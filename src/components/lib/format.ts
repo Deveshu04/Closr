@@ -39,6 +39,13 @@ export function shortDate(iso: string | undefined): string {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
+/** "Wed, 4 Nov" */
+export function weekdayDate(iso: string | undefined): string {
+  const d = toDate(iso);
+  if (!d) return "—";
+  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+}
+
 export function msSince(iso: string | undefined, now: number): number {
   const d = toDate(iso);
   return d ? Math.max(0, now - d.getTime()) : 0;

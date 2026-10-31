@@ -10,6 +10,7 @@ interface BolnaExecution {
   status?: string;
   transcript?: string;
   summary?: string;
+  conversation_duration?: number;
   context_details?: { recipient_data?: { call_ref?: string } };
 }
 
@@ -28,19 +29,22 @@ export async function POST(req: Request) {
   const { callRef, status: previous } = call;
   const status = mapBolnaStatus(payload.status);
   const finished = status === "completed" || status === "failed";
+  // Bolna posts call-disconnected and then completed (and may retry), so the first final event fixes
+  // the end time and nothing after it may reopen or extend the call.
+  const alreadyOver = previous === "completed" || previous === "failed";
 
   updateCall(callRef, {
-    ...(status && { status }),
+    ...(status && !alreadyOver && { status }),
     ...(payload.transcript && { transcript: payload.transcript }),
     ...(payload.summary && { summary: payload.summary }),
-    ...(finished && { endedAt: new Date().toISOString() }),
+    ...(payload.conversation_duration && { durationSec: Math.round(payload.conversation_duration) }),
+    ...(finished && !alreadyOver && { endedAt: new Date().toISOString() }),
   });
 
-  if (status === "in_progress" && previous !== "in_progress") {
+  if (status === "in_progress" && previous !== "in_progress" && !alreadyOver) {
     recordMoment({ callRef, kind: "call", title: "Customer picked up", status: "ok" });
   }
-  // Bolna posts both call-disconnected and completed; only the first transition into a final state is shown.
-  if (finished && previous !== "completed" && previous !== "failed") {
+  if (finished && !alreadyOver) {
     recordMoment({
       callRef,
       kind: "call",

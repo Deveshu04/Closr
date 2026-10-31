@@ -1,23 +1,11 @@
 "use client";
 
 import { Ellipsis, LoaderCircle, RotateCcw } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
+import { ClosrMark } from "./brand/ClosrMark";
+import { PaytmLogo } from "./brand/PaytmLogo";
 import { resetDemo } from "./lib/api";
-
-function LoopMark() {
-  return (
-    <svg viewBox="0 0 32 32" aria-hidden className="size-7 shrink-0">
-      <path
-        d="M16 4.5a11.5 11.5 0 1 1-10.6 7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-      <circle cx="5.4" cy="11.5" r="3.1" className="fill-sky" />
-    </svg>
-  );
-}
 
 function DemoMenu({ onReset }: { onReset: () => void }) {
   const [open, setOpen] = useState(false);
@@ -127,22 +115,43 @@ function DemoMenu({ onReset }: { onReset: () => void }) {
 
 export function Header({ reachable, onReset }: { reachable: boolean; onReset: () => void }) {
   return (
-    <header className="flex items-center justify-between gap-4 border-b border-rule bg-paper px-5 py-3 lg:px-8">
-      <div className="flex min-w-0 flex-col gap-x-5 gap-y-0.5 sm:flex-row sm:items-baseline">
-        <h1 className="flex items-center gap-2 font-serif text-[2rem] font-semibold leading-none tracking-[-0.01em] text-navy [font-variation-settings:'opsz'_60]">
-          <LoopMark />
-          Closr
+    <header className="flex items-center justify-between gap-3 border-b border-rule bg-sheet px-4 py-3 sm:px-5 lg:px-8">
+      <div className="flex min-w-0 items-center gap-x-5">
+        <h1 className="flex items-center gap-2.5 sm:gap-3">
+          <PaytmLogo height={22} />
+          <span aria-hidden className="h-6 w-px bg-rule" />
+          <span className="whitespace-nowrap text-[1.0625rem] font-semibold leading-none text-navy sm:text-lg">
+            Care Console
+          </span>
         </h1>
-        <p className="font-serif text-[1.0625rem] italic text-muted">Closes tickets. Closes deals. Closes the loop.</p>
+        <p className="hidden items-center gap-2 rounded-full bg-sky-wash py-1 pl-1.5 pr-3 text-sm font-medium text-navy md:inline-flex">
+          <span className="grid size-6 place-items-center rounded-full bg-navy text-white">
+            <ClosrMark className="size-4" />
+          </span>
+          <span>
+            <span className="font-semibold">Closr</span> · AI teammate
+          </span>
+        </p>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-3">
         {!reachable && (
           <p role="status" className="flex items-center gap-2 text-sm font-medium text-brick">
             <span aria-hidden className="size-2 rounded-full bg-brick" />
             <span className="hidden sm:inline">Console server not answering. Retrying.</span>
-            <span className="sm:hidden">Offline</span>
+            <span className="sr-only sm:hidden">Offline</span>
           </p>
         )}
+        <Link
+          href="/customer"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full border border-navy/20 px-3 text-sm font-semibold text-navy transition-colors hover:border-sky hover:bg-sky-wash"
+        >
+          <span className="sm:hidden">Customer</span>
+          <span className="hidden sm:inline">Customer view</span>
+          <span aria-hidden>↗</span>
+          <span className="sr-only">(opens in a new tab)</span>
+        </Link>
         <DemoMenu onReset={onReset} />
       </div>
     </header>

@@ -13,23 +13,13 @@ import {
   PhoneOff,
   PhoneOutgoing,
 } from "lucide-react";
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { useId } from "react";
 import type { CallRecord, Customer } from "@/lib/types";
-import { useNow } from "./hooks/useNow";
-import { startCall } from "./lib/api";
+import { type CallPhase, useCallRequest } from "./hooks/useCallRequest";
 import { duration, humanize, inr } from "./lib/format";
-import { displayIndianMobile, normalizeIndianMobile } from "./lib/phone";
+import { displayIndianMobile } from "./lib/phone";
 
-type CallStatus = CallRecord["status"];
-type PanelStatus = CallStatus | "idle";
-
-const ACTIVE: ReadonlySet<PanelStatus> = new Set<PanelStatus>(["dialing", "ringing", "in_progress"]);
-/** A call stuck "active" this long almost certainly lost its final webhook; let the presenter dial again. */
-const STALE_MS = 10 * 60_000;
-const PENDING_TIMEOUT_MS = 30_000;
-const PHONE_KEY = "closr.lastPhone";
-
-const STATUS: Record<PanelStatus, { label: string; icon: LucideIcon; tone: string }> = {
+const STATUS: Record<CallPhase, { label: string; icon: LucideIcon; tone: string }> = {
   idle: { label: "Ready to call", icon: Phone, tone: "text-white/65" },
   dialing: { label: "Dialing", icon: PhoneOutgoing, tone: "text-sky" },
   ringing: { label: "Ringing", icon: PhoneCall, tone: "text-sky" },
@@ -59,66 +49,8 @@ const SECTION =
 export function CallPanel({ call, customer, customerPulse, refresh, className = "" }: Props) {
   const inputId = useId();
   const hintId = useId();
-  const [phoneInput, setPhoneInput] = useState("");
-  const [blurred, setBlurred] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState<{ callRef?: string; at: number } | null>(null);
-
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(PHONE_KEY);
-      if (saved) setPhoneInput(saved);
-    } catch {
-      // Storage can be blocked (private mode, policy); the field just starts empty.
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!pending) return;
-    const arrived = call && (pending.callRef ? call.callRef === pending.callRef : ACTIVE.has(call.status));
-    if (arrived) {
-      setPending(null);
-      return;
-    }
-    const timer = setTimeout(() => setPending(null), Math.max(0, PENDING_TIMEOUT_MS - (Date.now() - pending.at)));
-    return () => clearTimeout(timer);
-  }, [pending, call]);
-
-  const phone = normalizeIndianMobile(phoneInput);
-  const status: PanelStatus = pending ? "dialing" : (call?.status ?? "idle");
-  const live = ACTIVE.has(status);
-  const now = useNow(1000, live);
-  const startedAt = pending ? pending.at : call ? Date.parse(call.startedAt) : NaN;
-  const endedAt = !pending && call?.endedAt ? Date.parse(call.endedAt) : NaN;
-  const stale = live && !pending && Number.isFinite(startedAt) && now - startedAt > STALE_MS;
-  const busy = starting || (live && !stale);
-  const elapsed = !Number.isFinite(startedAt)
-    ? null
-    : live
-      ? now - startedAt
-      : Number.isFinite(endedAt)
-        ? endedAt - startedAt
-        : null;
-  const showInvalid = blurred && phoneInput.trim() !== "" && !phone;
-
-  async function placeCall(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBlurred(true);
-    if (!phone || busy) return;
-    setStarting(true);
-    setError(null);
-    try {
-      window.localStorage.setItem(PHONE_KEY, phone);
-    } catch {
-      // Remembering the number is a convenience only.
-    }
-    const result = await startCall(phone);
-    setStarting(false);
-    if (result.ok) setPending({ callRef: result.callRef, at: Date.now() });
-    else setError(result.error);
-    refresh();
-  }
+  const request = useCallRequest(call, refresh);
+  const { phone, showInvalid, starting, error, stale, busy, live, elapsed, phase: status } = request;
 
   const meta = STATUS[status];
   const StatusIcon = meta.icon;
@@ -128,22 +60,19 @@ export function CallPanel({ call, customer, customerPulse, refresh, className = 
       aria-label="Call"
       className={`flex flex-col divide-y divide-white/10 bg-navy px-5 py-6 text-white sm:px-6 lg:flex-row lg:items-start lg:divide-x lg:divide-y-0 lg:py-5 xl:flex-col xl:items-stretch xl:divide-x-0 xl:divide-y xl:overflow-y-auto xl:py-6 [scrollbar-color:rgb(255_255_255/0.18)_transparent] [scrollbar-width:thin] ${className}`}
     >
-      <form onSubmit={placeCall} noValidate className={`${SECTION} lg:w-[23rem] lg:shrink-0 xl:w-auto`}>
+      <form onSubmit={request.submit} noValidate className={`${SECTION} lg:w-[23rem] lg:shrink-0 xl:w-auto`}>
         <label htmlFor={inputId} className="text-[15px] font-medium text-white/85">
-          Your mobile number
+          Customer&apos;s mobile number
         </label>
         <input
           id={inputId}
           type="tel"
           inputMode="tel"
-          autoComplete="tel"
+          autoComplete="off"
           placeholder="98765 43210"
-          value={phoneInput}
-          onChange={(e) => {
-            setPhoneInput(e.target.value);
-            setError(null);
-          }}
-          onBlur={() => setBlurred(true)}
+          value={request.phoneInput}
+          onChange={(e) => request.setPhoneInput(e.target.value)}
+          onBlur={request.onPhoneBlur}
           aria-invalid={showInvalid}
           aria-describedby={hintId}
           className={`figures mt-2 h-12 w-full rounded-md border bg-white/[0.07] px-3.5 text-lg tracking-wide text-white placeholder:text-white/30 focus:outline-none focus-visible:outline-none ${
@@ -168,7 +97,7 @@ export function CallPanel({ call, customer, customerPulse, refresh, className = 
           ) : (
             <PhoneCall aria-hidden size={24} strokeWidth={2.25} />
           )}
-          {starting ? "Calling…" : "Call me"}
+          {starting ? "Calling…" : "Call customer"}
         </button>
 
         {error && (
@@ -184,7 +113,7 @@ export function CallPanel({ call, customer, customerPulse, refresh, className = 
         )}
         {status === "idle" && !error && (
           <p className="mt-3 text-[15px] leading-snug text-white/75">
-            Your phone rings in a few seconds. Talk to Closr the way you would talk to support.
+            Their phone rings in a few seconds. Closr handles the call; every step it takes shows up here.
           </p>
         )}
         <p className="mt-3 flex items-start gap-2 text-[13px] leading-snug text-white/50">

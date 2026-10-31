@@ -5,17 +5,18 @@
   --font-sans: var(--font-instrument), "Instrument Sans", system-ui, sans-serif;
 }
 
+/* Paytm brand kit: navy primary, cyan accent, white surfaces on a cool light grey. */
 @theme {
   --color-navy: #002e6e;
   --color-navy-deep: #00214f;
   --color-sky: #00baf2;
-  --color-sky-wash: #e3f6fd;
-  --color-paper: #f3f3f1;
+  --color-sky-wash: #e6f7fd;
+  --color-paper: #f5f7fa;
   --color-sheet: #ffffff;
-  --color-ink: #16233a;
-  --color-muted: #5b6779;
-  --color-faint: #8a94a3;
-  --color-rule: #dcdfe3;
+  --color-ink: #13233f;
+  --color-muted: #5a6780;
+  --color-faint: #8b95a7;
+  --color-rule: #dfe4eb;
   --color-amber: #b77d00;
   --color-amber-bright: #f2a900;
   --color-amber-wash: #fff4d9;
@@ -23,6 +24,16 @@
   --color-leaf-wash: #e2f2ea;
   --color-brick: #a3453d;
   --color-brick-wash: #f6e5e2;
+}
+
+/* The one raised surface used across both views: white, hairline border, soft lift. */
+@utility card {
+  border-radius: 1rem;
+  border: 1px solid var(--color-rule);
+  background-color: var(--color-sheet);
+  box-shadow:
+    0 1px 2px rgb(19 35 63 / 0.04),
+    0 12px 28px -18px rgb(19 35 63 / 0.22);
 }
 
 :root {
@@ -179,6 +190,20 @@ body {
   }
 }
 
+/* Rings radiating from the assistant's avatar while a call is live. */
+.call-halo {
+  animation: halo 2.2s ease-out infinite;
+}
+@keyframes halo {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-sky) 50%, transparent);
+  }
+  80%,
+  100% {
+    box-shadow: 0 0 0 18px color-mix(in srgb, var(--color-sky) 0%, transparent);
+  }
+}
+
 /* The perforated edge on handoff slips. */
 .perforated {
   -webkit-mask: radial-gradient(circle 5px at 0 50%, transparent 98%, #000) 0 0 / 100% 16px repeat-y;
@@ -202,6 +227,10 @@ body {
   .live-dot::after {
     animation: none;
     opacity: 0;
+  }
+  .call-halo {
+    animation: none;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-sky) 45%, transparent);
   }
   .row-touched > td,
   .row-touched > td:first-child {

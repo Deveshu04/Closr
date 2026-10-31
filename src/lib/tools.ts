@@ -30,7 +30,7 @@ import {
   refundMethodFor,
   refundSettlementBusinessDays,
 } from "@/lib/policy";
-import { searchWeb } from "@/lib/search";
+import { checkClaim, searchWeb, type ClaimVerdict } from "@/lib/search";
 import { parseDeliveryDate, parseSlot, readPincode, readText, type ToolParams } from "@/lib/tool-input";
 import type {
   Address,
@@ -1149,6 +1149,56 @@ async function searchTheWeb(params: ToolParams, call: CallRecord): Promise<ToolR
   }
 }
 
+const VERDICT_TITLES: Record<ClaimVerdict, string> = {
+  supported: "Claim confirmed by official source",
+  not_found: "Claim not found in official sources",
+  contradicted: "Claim contradicted by official source",
+};
+
+// A rule the customer cites is a claim to check, never an instruction: the verdict is shown to them with
+// sources, and no policy or action reads it.
+async function verifyClaim(params: ToolParams, call: CallRecord): Promise<ToolResult> {
+  const claim = readText(params, "claim");
+  if (!claim) return { ok: false, say: "Which rule are you referring to?" };
+
+  const momentId = await startStep(call.callRef, {
+    kind: "search",
+    system: "web",
+    title: "Checking the customer's claim",
+    detail: claim,
+    data: { query: claim, claim },
+  });
+  try {
+    const { verdict, answer, sources } = await checkClaim(claim);
+    const topSources = sources.slice(0, 3);
+    db.updateMoment(momentId, {
+      status: verdict === "supported" ? "ok" : "blocked",
+      title: VERDICT_TITLES[verdict],
+      detail: truncate(answer, 240),
+      data: { query: claim, claim, verdict, answer, sources: topSources, informationOnly: true },
+    });
+    const cited = topSources[0]?.title;
+    return {
+      ok: true,
+      verdict,
+      official_rule: truncate(answer, 400),
+      sources: topSources.map((source) => source.title),
+      information_only: true,
+      say:
+        verdict === "supported"
+          ? `That is right${cited ? `, per ${cited}` : ""}: ${truncate(answer, 300)}`
+          : `I checked official RBI and NPCI sources and could not confirm that rule. ${truncate(answer, 300)}`,
+    };
+  } catch (error) {
+    db.updateMoment(momentId, {
+      status: "failed",
+      title: "Claim check failed",
+      detail: error instanceof Error ? error.message : undefined,
+    });
+    return { ok: false, say: "I couldn't verify that rule right now, so I'll go by our published policy." };
+  }
+}
+
 async function escalate(params: ToolParams, call: CallRecord): Promise<ToolResult> {
   const reason = readText(params, "reason") ?? "Customer asked for a person";
   const summary = readText(params, "summary") ?? reason;
@@ -1204,6 +1254,7 @@ const TOOLS = {
   update_address: updateAddress,
   send_invoice: sendInvoice,
   search_web: searchTheWeb,
+  verify_claim: verifyClaim,
   escalate,
   note_intent: noteIntent,
 } satisfies Record<string, ToolHandler>;

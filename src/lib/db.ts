@@ -92,8 +92,10 @@ function samePhone(a: string, b: string): boolean {
   return left !== "" && left === normalizePhone(b);
 }
 
+/** Re-seeds the demo data but keeps past calls and their moments: transcripts are the review record. */
 export function resetDb(): void {
-  save(freshState());
+  const { calls, moments } = read((state) => ({ calls: state.calls, moments: state.moments }));
+  save({ ...freshState(), calls, moments });
 }
 
 export function getState(): ConsoleState {
@@ -145,6 +147,10 @@ export function getCall(callRef: string): CallRecord | null {
 
 export function findCallByExecutionId(executionId: string): CallRecord | null {
   return read((state) => state.calls.find((call) => call.bolnaExecutionId === executionId) ?? null);
+}
+
+export function listCalls(): CallRecord[] {
+  return read((state) => newestFirst(state.calls, (call) => call.startedAt));
 }
 
 /** The most recently started call, whatever its status; the console keeps showing it after hang-up. */

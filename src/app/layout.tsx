@@ -16,8 +16,8 @@ const sans = Instrument_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Closr console",
-  description: "Watch Closr talk to a customer and act in the back office, live.",
+  title: "Paytm Care Console · Closr",
+  description: "Watch Closr, Paytm's AI care teammate, talk to a customer and act in the back office, live.",
 };
 
 export const viewport: Viewport = {

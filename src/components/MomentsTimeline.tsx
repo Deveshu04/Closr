@@ -101,7 +101,7 @@ function EmptyTimeline({ waiting }: { waiting: boolean }) {
     <div className="max-w-[40rem] pt-2">
       <p className="font-serif text-[1.75rem] leading-snug text-navy [font-variation-settings:'opsz'_40] sm:text-[2rem]">
         {waiting
-          ? "Pick up when your phone rings. Each step Closr takes will appear here as it happens."
+          ? "Closr is calling the customer. Each step it takes will appear here as it happens."
           : "Every step Closr takes on the call lands here, the moment it takes it."}
       </p>
       <p className="mt-3 max-w-[56ch] text-base leading-relaxed text-muted">

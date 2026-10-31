@@ -2,7 +2,6 @@
 
 import { MotionConfig } from "motion/react";
 import { useMemo } from "react";
-import type { Moment } from "@/lib/types";
 import { ApprovalToast } from "./ApprovalToast";
 import { BackOffice } from "./BackOffice";
 import { CallPanel } from "./CallPanel";
@@ -10,17 +9,11 @@ import { Header } from "./Header";
 import { isPulsing, useActivity } from "./hooks/useActivity";
 import { useApprovals } from "./hooks/useApprovals";
 import { useConsoleState } from "./hooks/useConsoleState";
+import { chronological } from "./lib/moments";
 import { MomentsTimeline } from "./MomentsTimeline";
 
 const POLL_MS = 700;
 const LIVE = new Set(["dialing", "ringing", "in_progress"]);
-
-function chronological(moments: Moment[]): Moment[] {
-  return moments
-    .map((m, i) => ({ m, i, t: Date.parse(m.at) }))
-    .sort((a, b) => (Number.isFinite(a.t) && Number.isFinite(b.t) && a.t !== b.t ? a.t - b.t : a.i - b.i))
-    .map(({ m }) => m);
-}
 
 export function Console() {
   const { state, loaded, reachable, refresh } = useConsoleState(POLL_MS);

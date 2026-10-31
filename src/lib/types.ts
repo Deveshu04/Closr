@@ -162,6 +162,8 @@ export interface CallRecord {
   status: "dialing" | "ringing" | "in_progress" | "completed" | "failed";
   startedAt: string;
   endedAt?: string;
+  /** Talk time as billed by the telephony provider, once Bolna reports it. */
+  durationSec?: number;
   transcript?: string;
   summary?: string;
 }

@@ -29,6 +29,17 @@ export async function placeCall(
   return { executionId: body.execution_id };
 }
 
+export interface BolnaExecutionRecord {
+  status?: string;
+  transcript?: string;
+  conversation_duration?: number;
+}
+
+export async function fetchExecution(executionId: string): Promise<BolnaExecutionRecord | null> {
+  const res = await fetch(`${BOLNA_API}/executions/${executionId}`, { headers: bolnaHeaders() });
+  return res.ok ? ((await res.json()) as BolnaExecutionRecord) : null;
+}
+
 const STATUS_MAP: Record<string, "dialing" | "ringing" | "in_progress" | "completed" | "failed"> = {
   queued: "dialing",
   scheduled: "dialing",

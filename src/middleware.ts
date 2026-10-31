@@ -10,11 +10,29 @@ function sameSecret(a: string, b: string): boolean {
   return diff === 0;
 }
 
+const LOOPBACK = /^(127\.\d+\.\d+\.\d+|::1|::ffff:127\.\d+\.\d+\.\d+)$/;
+
+function isLocal(request: NextRequest): boolean {
+  const host = (request.headers.get("host") ?? "").replace(/:\d+$/, "");
+  // Next fills X-Forwarded-For with the socket address when absent; a tunnel appends the real client last,
+  // so only the final hop is trustworthy. X-Forwarded-Host is client-supplied and deliberately ignored.
+  const lastHop = request.headers.get("x-forwarded-for")?.split(",").pop()?.trim() ?? "";
+  return LOCAL_HOSTS.has(host) && LOOPBACK.test(lastHop);
+}
+
+function isCrossSite(request: NextRequest): boolean {
+  if (request.method === "GET" || request.method === "HEAD") return false;
+  const site = request.headers.get("sec-fetch-site");
+  if (site && site !== "same-origin" && site !== "none") return true;
+  const origin = request.headers.get("origin");
+  return !!origin && new URL(origin).host !== request.headers.get("host");
+}
+
 // The tunnel that lets Bolna reach our tools also exposes the console, which shows the caller's
 // real number and can approve refunds. Local use stays frictionless; remote use needs CONSOLE_KEY.
 export function middleware(request: NextRequest) {
-  const host = (request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "").replace(/:\d+$/, "");
-  if (LOCAL_HOSTS.has(host)) return NextResponse.next();
+  if (isCrossSite(request)) return new NextResponse("Cross-site request refused", { status: 403 });
+  if (isLocal(request)) return NextResponse.next();
 
   const key = process.env.CONSOLE_KEY;
   if (!key) return new NextResponse("Console is only available locally.", { status: 403 });
@@ -33,5 +51,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/api/state", "/api/call", "/api/reset", "/api/approvals/:path*"],
+  matcher: ["/", "/customer", "/api/state", "/api/call", "/api/calls", "/api/calls/:path*", "/api/reset", "/api/approvals/:path*"],
 };

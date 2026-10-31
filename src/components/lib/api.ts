@@ -28,6 +28,11 @@ export function decideApproval(id: string, decision: "approved" | "denied"): Pro
   return post(`/api/approvals/${encodeURIComponent(id)}`, { decision }, "Couldn't send the decision");
 }
 
+/** Served as a text/plain attachment: call details, the conversation and every action Closr took. */
+export function transcriptUrl(callRef: string): string {
+  return `/api/calls/${encodeURIComponent(callRef)}/transcript`;
+}
+
 export function resetDemo(): Promise<Result> {
   return post("/api/reset", {}, "Couldn't reset the demo data");
 }
