@@ -12,7 +12,7 @@ interface RouteContext {
 
 function isAuthorized(request: Request): boolean {
   const secret = process.env.TOOLS_SECRET;
-  if (!secret) return true;
+  if (!secret) return false;
   const presented = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   const expected = Buffer.from(secret);
   const actual = Buffer.from(presented);
@@ -54,8 +54,4 @@ async function handle(request: Request, context: RouteContext, body: unknown): P
 
 export async function POST(request: Request, context: RouteContext) {
   return handle(request, context, await readBody(request));
-}
-
-export async function GET(request: Request, context: RouteContext) {
-  return handle(request, context, {});
 }

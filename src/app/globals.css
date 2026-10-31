@@ -1,26 +1,218 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-serif: var(--font-source-serif), "Source Serif 4", Georgia, serif;
+  --font-sans: var(--font-instrument), "Instrument Sans", system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@theme {
+  --color-navy: #002e6e;
+  --color-navy-deep: #00214f;
+  --color-sky: #00baf2;
+  --color-sky-wash: #e3f6fd;
+  --color-paper: #f3f3f1;
+  --color-sheet: #ffffff;
+  --color-ink: #16233a;
+  --color-muted: #5b6779;
+  --color-faint: #8a94a3;
+  --color-rule: #dcdfe3;
+  --color-amber: #b77d00;
+  --color-amber-bright: #f2a900;
+  --color-amber-wash: #fff4d9;
+  --color-leaf: #0d7f57;
+  --color-leaf-wash: #e2f2ea;
+  --color-brick: #a3453d;
+  --color-brick-wash: #f6e5e2;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "kern", "liga";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-sky);
+  outline-offset: 2px;
+}
+
+.figures {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Instrument Sans ships a width axis; the condensed cut is reserved for stamped record ids and verdicts. */
+.stamp-face {
+  font-stretch: 75%;
+  font-variation-settings: "wdth" 75;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.04em;
+}
+
+.scrollbar-quiet {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-navy) 22%, transparent) transparent;
+}
+
+/* Running moments: a light sweep across the surface. */
+.is-running {
+  position: relative;
+  overflow: hidden;
+}
+.is-running::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 25%,
+    color-mix(in srgb, var(--color-sky) 18%, transparent) 50%,
+    transparent 75%
+  );
+  transform: translateX(-100%);
+  animation: sweep 1.5s ease-in-out infinite;
+}
+@keyframes sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.is-waiting {
+  animation: amber-pulse 1.8s ease-out infinite;
+}
+@keyframes amber-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-amber-bright) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--color-amber-bright) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.node-spin::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  border-top-color: var(--color-sky);
+  border-right-color: var(--color-sky);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.live-dot {
+  position: relative;
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: inherit;
+  animation: ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@keyframes ping {
+  75%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+/* A record the agent just touched: the row lights up, then settles back over a few seconds. */
+.row-touched > td {
+  animation: touch-flash 6s ease-out forwards;
+}
+.row-touched > td:first-child {
+  animation: touch-flash 6s ease-out forwards, touch-bar 6s ease-out forwards;
+}
+@keyframes touch-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--color-sky) 34%, transparent);
+  }
+  60% {
+    background-color: color-mix(in srgb, var(--color-sky) 14%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@keyframes touch-bar {
+  0%,
+  70% {
+    box-shadow: inset 4px 0 0 var(--color-sky);
+  }
+  100% {
+    box-shadow: inset 4px 0 0 transparent;
+  }
+}
+
+.block-touched {
+  animation: block-flash 5s ease-out forwards;
+}
+@keyframes block-flash {
+  0% {
+    box-shadow: 0 0 0 2px var(--color-sky), 0 0 28px color-mix(in srgb, var(--color-sky) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent, 0 0 0 transparent;
+  }
+}
+
+/* The perforated edge on handoff slips. */
+.perforated {
+  -webkit-mask: radial-gradient(circle 5px at 0 50%, transparent 98%, #000) 0 0 / 100% 16px repeat-y;
+  mask: radial-gradient(circle 5px at 0 50%, transparent 98%, #000) 0 0 / 100% 16px repeat-y;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-running::after {
+    animation: none;
+    transform: none;
+    background: color-mix(in srgb, var(--color-sky) 7%, transparent);
+  }
+  .is-waiting {
+    animation: none;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-amber-bright) 40%, transparent);
+  }
+  .node-spin::before {
+    animation: none;
+    border-color: var(--color-sky);
+  }
+  .live-dot::after {
+    animation: none;
+    opacity: 0;
+  }
+  .row-touched > td,
+  .row-touched > td:first-child {
+    animation: none;
+    background-color: color-mix(in srgb, var(--color-sky) 16%, transparent);
+  }
+  .row-touched > td:first-child {
+    box-shadow: inset 4px 0 0 var(--color-sky);
+  }
+  .block-touched {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--color-sky);
+  }
 }

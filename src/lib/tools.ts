@@ -189,7 +189,7 @@ function locateOrder(params: ToolParams, call: CallRecord, step: { kind: MomentK
   const reference = readText(params, "order_id");
   const order = reference ? findOrder(reference, call.customerId) : null;
   // Another customer's order is reported as not found, so a caller can't probe other accounts.
-  if (order && (!call.customerId || order.customerId === call.customerId)) return { found: true, order };
+  if (order && call.customerId && order.customerId === call.customerId) return { found: true, order };
 
   const known = call.customerId ? db.listOrders(call.customerId).slice(0, 4) : [];
   db.recordMoment({
@@ -685,7 +685,8 @@ export async function resolveApproval(id: string, decision: "approved" | "denied
 
 async function lookupCustomer(params: ToolParams, call: CallRecord): Promise<ToolResult> {
   recordUnderstanding(params, call);
-  const phone = readText(params, "phone") ?? call.phone;
+  // Identity comes from the number we dialled, never from what the model heard; the param only matters outside our dialer.
+  const phone = call.phone || readText(params, "phone");
   const momentId = await startStep(call.callRef, {
     kind: "lookup",
     system: "crm",
@@ -1153,7 +1154,7 @@ async function escalate(params: ToolParams, call: CallRecord): Promise<ToolResul
   const summary = readText(params, "summary") ?? reason;
   const reference = readText(params, "order_id");
   const candidate = reference ? findOrder(reference, call.customerId) : null;
-  const order = candidate && (!call.customerId || candidate.customerId === call.customerId) ? candidate : null;
+  const order = candidate && call.customerId && candidate.customerId === call.customerId ? candidate : null;
 
   const customerId = call.customerId ?? order?.customerId;
   const customer = customerId ? db.getCustomer(customerId) : null;

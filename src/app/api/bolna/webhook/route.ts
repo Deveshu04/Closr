@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { mapBolnaStatus } from "@/lib/bolna";
 import { findCallByExecutionId, getCall, recordMoment, updateCall } from "@/lib/db";
@@ -13,8 +14,9 @@ interface BolnaExecution {
 }
 
 export async function POST(req: Request) {
-  const secret = process.env.WEBHOOK_SECRET;
-  if (secret && new URL(req.url).searchParams.get("key") !== secret) {
+  const secret = Buffer.from(process.env.WEBHOOK_SECRET ?? "");
+  const presented = Buffer.from(new URL(req.url).searchParams.get("key") ?? "");
+  if (!secret.length || presented.length !== secret.length || !timingSafeEqual(presented, secret)) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 
