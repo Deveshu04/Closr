@@ -46,3 +46,4 @@ next-env.d.ts
 /scratch/
 !.env.example
 /.claude/
+/video/

@@ -6,13 +6,16 @@ import type { Customer, ProfileKind } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+// Callers are told up front that the call is recorded and why (DPDP: notice before processing).
+const RECORDING_NOTICE = "यह call quality और training के लिए record हो सकती है।";
+
 function greetingFor(customer: Customer | undefined): string {
   const name = customer ? `${customer.name.split(" ")[0]} जी` : "";
   if (customer?.kind === "merchant") {
     const store = customer.business?.name ?? "आपकी दुकान";
-    return `नमस्ते ${name}, मैं पेटीएम for Business support से क्लोज़र बोल रही हूँ। आपने ${store} के लिए call back माँगा था, बताइए क्या दिक्कत आ रही है?`;
+    return `नमस्ते ${name}, मैं पेटीएम for Business support से क्लोज़र बोल रही हूँ। आपने ${store} के लिए call back माँगा था, बताइए क्या दिक्कत आ रही है? ${RECORDING_NOTICE}`;
   }
-  return `नमस्ते ${name}, मैं पेटीएम customer care से क्लोज़र बोल रही हूँ। आपने अभी call back माँगा था, बताइए मैं आपकी क्या मदद कर सकती हूँ?`;
+  return `नमस्ते ${name}, मैं पेटीएम customer care से क्लोज़र बोल रही हूँ। आपने अभी call back माँगा था, बताइए मैं आपकी क्या मदद कर सकती हूँ? ${RECORDING_NOTICE}`;
 }
 
 export async function POST(req: Request) {
