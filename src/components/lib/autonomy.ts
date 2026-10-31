@@ -14,7 +14,7 @@ export const LEVELS: Record<AutonomyLevel, { code: string; name: string; meaning
   0: { code: "L0", name: "Shadow", meaning: "Closr suggests, a specialist acts" },
   1: { code: "L1", name: "Approve", meaning: "Every payout waits for one tap" },
   2: { code: "L2", name: "Auto", meaning: "Acts alone within the limit, asks above it" },
-  3: { code: "L3", name: "Autonomous", meaning: "Unlocks after proven accuracy" },
+  3: { code: "L3", name: "Autonomous", meaning: "Acts alone even above the limit; risk reviews still go to a person" },
 };
 
 export function isAutonomyLevel(value: unknown): value is AutonomyLevel {

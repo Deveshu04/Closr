@@ -789,7 +789,25 @@ async function movePayout(request: PayoutRequest): Promise<ToolResult> {
     });
     return requestApproval({ ...request, brief: `Trust dial L1 (Approve): ${request.brief}` }, view);
   }
+  if (level === 3 && request.decision.outcome === "needs_approval" && onlyOverLimit(request.decision)) {
+    db.recordMoment({
+      callRef: request.call.callRef,
+      kind: "policy",
+      system: "policy",
+      status: "ok",
+      title: `Trust dial L3 · acting above the ${view.noun} limit`,
+      detail: `${formatRupees(request.amount)} is over the auto-approve limit, but ${view.noun} is set to Autonomous; every other rule still passed`,
+      data: { autonomy: 3, workflow, outcome: "allow" },
+    });
+    return payNow(request, view);
+  }
   return request.decision.outcome === "needs_approval" ? requestApproval(request, view) : payNow(request, view);
+}
+
+// L3 lifts the amount limit and nothing else: a risk flag or any other review rule still sends the case to a person.
+function onlyOverLimit(decision: PolicyDecision): boolean {
+  const failed = decision.checks.filter((check) => !check.passed);
+  return failed.length > 0 && failed.every((check) => check.rule.includes("auto-approve limit"));
 }
 
 /** Records a person's decision and, on approval, makes the payout; the waiting tool call picks up the result. */

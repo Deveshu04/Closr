@@ -26,7 +26,7 @@ Every dispute schedules a follow-up: the case closes only when the money has act
 ## Built for trust
 
 - **Policies as code decide, not the model.** Every money movement passes a deterministic policy check, shown to the care team as a checklist.
-- **Earned autonomy, per workflow.** A trust dial sets each money workflow to L0 Shadow (Closr suggests, a specialist acts), L1 Approve (every payout waits for one tap) or L2 Auto within limits. L3 stays locked until accuracy is proven.
+- **Earned autonomy, per workflow.** A trust dial sets each money workflow to L0 Shadow (Closr suggests, a specialist acts), L1 Approve (every payout waits for one tap), L2 Auto within limits, or L3 Autonomous for workflows with proven accuracy. L3 lifts only the amount limit: eligibility, duplicate protection and risk reviews still apply.
 - **A teammate that learns.** Specialists coach Closr with "next time, do X"; every lesson reaches the next call and chat immediately.
 - **Measurable outcomes.** The console tracks conversations, autonomous and verified resolutions, money returned, escalations and time to resolve.
 - **Nothing pays twice.** Every action is idempotent per subject, so a repeated turn on a call returns the same refund or dispute.

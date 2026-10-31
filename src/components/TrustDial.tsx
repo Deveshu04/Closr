@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleAlert, Gauge, LoaderCircle, Lock, SlidersHorizontal, X } from "lucide-react";
+import { CircleAlert, Gauge, LoaderCircle, ShieldAlert, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { AutonomyLevel, Workflow } from "@/lib/types";
 import { LEVELS, WORKFLOWS } from "./lib/autonomy";
@@ -9,7 +9,7 @@ import { inr } from "./lib/format";
 
 type PerWorkflow<T> = Partial<Record<Workflow, T>>;
 
-const SETTABLE: AutonomyLevel[] = [0, 1, 2];
+const SETTABLE: AutonomyLevel[] = [0, 1, 2, 3];
 /** How long a saved choice may wait for the polled state to agree before the server's value wins. */
 const CONFIRM_MS = 5000;
 
@@ -27,7 +27,9 @@ function without<T>(map: PerWorkflow<T>, key: Workflow): PerWorkflow<T> {
 }
 
 function meaning(level: AutonomyLevel, limit: number): string {
-  return level === 2 ? `Acts alone up to ${inr(limit)}, asks above it` : LEVELS[level].meaning;
+  if (level === 2) return `Acts alone up to ${inr(limit)}, asks above it`;
+  if (level === 3) return `Acts alone even above ${inr(limit)}; risk reviews still go to a person`;
+  return LEVELS[level].meaning;
 }
 
 /** Optimistic per-workflow levels. Choices made while a save is in flight collapse into one request for the newest. */
@@ -94,7 +96,6 @@ function LevelPicker({
   onChoose: (workflow: Workflow, level: AutonomyLevel) => void;
 }) {
   const name = useId();
-  const tipId = useId();
   const meaningId = useId();
   return (
     <fieldset aria-describedby={meaningId} className="min-w-0">
@@ -133,29 +134,20 @@ function LevelPicker({
             </label>
           );
         })}
-        <span
-          tabIndex={0}
-          aria-disabled="true"
-          aria-describedby={tipId}
-          className="group relative cursor-not-allowed rounded-md px-1 py-1.5 text-center text-faint focus:outline-none focus-visible:outline-2 focus-visible:outline-sky"
-        >
-          <span className="flex items-center justify-center gap-0.5 text-[13px] font-semibold leading-tight">
-            <Lock aria-label="Locked" size={10} strokeWidth={2.5} />
-            {LEVELS[3].code}
-          </span>
-          <span className="block truncate text-[11.5px] leading-tight">{LEVELS[3].name}</span>
-          <span
-            id={tipId}
-            role="tooltip"
-            className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 w-max max-w-[11rem] rounded-md bg-navy px-2.5 py-1.5 text-left text-xs font-semibold leading-snug text-white opacity-0 shadow-[0_10px_24px_-10px_rgb(0_0_0/0.5)] transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-          >
-            {LEVELS[3].meaning}
-          </span>
-        </span>
       </div>
       <p id={meaningId} className="mt-1.5 text-[13.5px] leading-snug text-muted">
         <span className="font-semibold text-ink">{LEVELS[level].name}:</span> {meaning(level, limit)}.
       </p>
+      {level === 3 && (
+        <p className="mt-2 flex items-start gap-2 rounded-md bg-amber-wash px-2.5 py-2 text-[12.5px] leading-snug text-amber ring-1 ring-amber/25">
+          <ShieldAlert aria-hidden size={15} className="mt-px shrink-0" />
+          <span>
+            <span className="font-semibold">Prototype guidance:</span> use L3 only for a workflow whose accuracy has been measured.
+            It lifts the amount limit and nothing else: eligibility, duplicate protection and risk reviews still apply, and every
+            payout is logged for audit.
+          </span>
+        </p>
+      )}
       {error && (
         <p role="alert" className="mt-1 flex items-start gap-1.5 text-[13px] font-medium text-brick">
           <CircleAlert aria-hidden size={14} className="mt-0.5 shrink-0" />
@@ -263,7 +255,7 @@ export function TrustDial({ autonomy, refresh }: Props) {
             ))}
           </div>
           <p className="mt-5 border-t border-rule pt-3 text-[12.5px] leading-snug text-faint">
-            Set by Paytm care ops. Policy limits still apply at every level; L3 unlocks only after measured accuracy.
+            Set by Paytm care ops. Policy rules apply at every level; L3 lifts only the amount limit and is meant for workflows with proven accuracy.
           </p>
         </div>
       </dialog>
