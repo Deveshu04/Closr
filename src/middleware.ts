@@ -34,20 +34,23 @@ export function middleware(request: NextRequest) {
   if (isCrossSite(request)) return new NextResponse("Cross-site request refused", { status: 403 });
   if (isLocal(request)) return NextResponse.next();
 
-  const key = process.env.CONSOLE_KEY;
+  const key = process.env.CONSOLE_KEY?.trim();
   if (!key) return new NextResponse("Console is only available locally.", { status: 403 });
 
   if (sameSecret(request.cookies.get(COOKIE)?.value ?? "", key)) return NextResponse.next();
 
-  const presented = request.nextUrl.searchParams.get("key");
+  const presented = request.nextUrl.searchParams.get("key")?.trim();
   if (presented && sameSecret(presented, key)) {
-    const clean = request.nextUrl.clone();
+    // Behind a proxy nextUrl carries the server's bind address, so rebuild the public URL from the request.
+    const proto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim() || "https";
+    const clean = new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, `${proto}://${request.headers.get("host")}`);
     clean.searchParams.delete("key");
     const response = NextResponse.redirect(clean);
-    response.cookies.set(COOKIE, key, { httpOnly: true, sameSite: "strict", secure: true, maxAge: 60 * 60 * 12 });
+    // Lax, so the cookie survives the redirect when the link is opened from another site.
+    response.cookies.set(COOKIE, key, { httpOnly: true, sameSite: "lax", secure: true, maxAge: 60 * 60 * 12 });
     return response;
   }
-  return new NextResponse("Unauthorized", { status: 401 });
+  return new NextResponse("Unauthorized. Open this page with ?key=<CONSOLE_KEY> once.", { status: 401 });
 }
 
 export const config = {
