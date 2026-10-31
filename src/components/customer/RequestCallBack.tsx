@@ -1,25 +1,46 @@
 "use client";
 
 import {
-  CalendarClock,
+  ArrowLeftRight,
   CircleAlert,
-  FileText,
+  Gift,
+  HandCoins,
   Headset,
-  IndianRupee,
   Info,
+  Landmark,
   LoaderCircle,
+  type LucideIcon,
   PhoneCall,
   PhoneMissed,
+  Receipt,
+  ShieldCheck,
+  Speaker,
 } from "lucide-react";
 import { useId } from "react";
+import type { ProfileKind } from "@/lib/types";
 import type { CallRequest } from "../hooks/useCallRequest";
 import { displayIndianMobile, withoutCountryCode } from "../lib/phone";
 
-const CAN_FIX = [
-  { icon: IndianRupee, label: "Refunds" },
-  { icon: CalendarClock, label: "Delivery changes" },
-  { icon: FileText, label: "Invoices" },
-];
+const COPY: Record<ProfileKind, { title: string; pitch: string; canFix: { icon: LucideIcon; label: string }[] }> = {
+  consumer: {
+    title: "Get help on a call",
+    pitch: "Closr, our AI assistant, calls you back in seconds and can fix most payment issues right on the call.",
+    canFix: [
+      { icon: ArrowLeftRight, label: "Stuck UPI payments" },
+      { icon: Gift, label: "Cashback" },
+      { icon: HandCoins, label: "Loan EMIs" },
+    ],
+  },
+  merchant: {
+    title: "Business help on a call",
+    pitch: "Closr calls you back in seconds and can fix most Soundbox, settlement and billing issues on the call.",
+    canFix: [
+      { icon: Speaker, label: "Soundbox" },
+      { icon: Landmark, label: "Settlements" },
+      { icon: Receipt, label: "Rental charges" },
+    ],
+  },
+};
 
 const HOW_IT_WORKS = [
   "We call you back in a few seconds",
@@ -28,12 +49,16 @@ const HOW_IT_WORKS = [
 ];
 
 interface Props {
+  app: ProfileKind;
+  /** The signed-in user's first name, for the greeting. */
+  firstName: string | undefined;
   request: CallRequest;
   /** The last call never connected, so say so before asking again. */
   lastCallMissed: boolean;
 }
 
-export function RequestCallBack({ request, lastCallMissed }: Props) {
+export function RequestCallBack({ app, firstName, request, lastCallMissed }: Props) {
+  const copy = COPY[app];
   const inputId = useId();
   const hintId = useId();
   const { phone, showInvalid, starting, busy, error } = request;
@@ -45,12 +70,13 @@ export function RequestCallBack({ request, lastCallMissed }: Props) {
         <span className="relative grid size-11 place-items-center rounded-full bg-sky text-navy">
           <Headset aria-hidden size={22} strokeWidth={2.25} />
         </span>
-        <h2 className="relative mt-4 text-[1.5rem] font-bold leading-tight tracking-[-0.01em]">Get help on a call</h2>
-        <p className="relative mt-2 text-[15px] leading-relaxed text-white/80">
-          Closr, our AI assistant, calls you back in seconds and can fix most issues right on the call.
-        </p>
+        {firstName && <p className="relative mt-4 text-[14px] font-medium text-sky">Hi {firstName},</p>}
+        <h2 className={`relative text-[1.5rem] font-bold leading-tight tracking-[-0.01em] ${firstName ? "mt-0.5" : "mt-4"}`}>
+          {copy.title}
+        </h2>
+        <p className="relative mt-2 text-[15px] leading-relaxed text-white/80">{copy.pitch}</p>
         <ul aria-label="Closr can help with" className="relative mt-4 flex flex-wrap gap-2">
-          {CAN_FIX.map(({ icon: Icon, label }) => (
+          {copy.canFix.map(({ icon: Icon, label }) => (
             <li
               key={label}
               className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[13px] font-medium text-white/90"
@@ -141,6 +167,11 @@ export function RequestCallBack({ request, lastCallMissed }: Props) {
             </li>
           ))}
         </ol>
+        <p className="mt-4 flex items-start gap-2 rounded-xl bg-sheet px-3 py-2.5 text-[12.5px] leading-snug text-muted ring-1 ring-rule">
+          <ShieldCheck aria-hidden size={15} className="mt-px shrink-0 text-leaf" />
+          Closr acts only within Paytm policy and checks every change. Anything bigger goes to a Paytm specialist for
+          approval while you&apos;re on the call.
+        </p>
       </section>
     </div>
   );

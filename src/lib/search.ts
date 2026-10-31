@@ -15,7 +15,11 @@ function openai(): OpenAI {
 }
 
 // Answers are read aloud mid-call, so they are capped hard; a search is forced so every answer has sources.
-async function askWeb(instructions: string, input: string, allowedDomains?: string[]): Promise<WebAnswer> {
+async function askWeb(
+  instructions: string,
+  input: string,
+  { allowedDomains, maxSearches = 2 }: { allowedDomains?: string[]; maxSearches?: number } = {},
+): Promise<WebAnswer> {
   const response = await openai().responses.create(
     {
       model: process.env.OPENAI_SEARCH_MODEL ?? "gpt-5.4-mini",
@@ -28,9 +32,10 @@ async function askWeb(instructions: string, input: string, allowedDomains?: stri
         },
       ],
       tool_choice: "required",
+      max_tool_calls: maxSearches,
       include: ["web_search_call.action.sources"],
       reasoning: { effort: "low" },
-      max_output_tokens: 400,
+      max_output_tokens: 800,
       instructions,
       input,
     },
@@ -79,15 +84,18 @@ export interface ClaimCheck extends WebAnswer {
 // and a claim counts as supported only when one of them is actually cited.
 export async function checkClaim(claim: string): Promise<ClaimCheck> {
   const { answer, sources } = await askWeb(
-    "A customer on a Paytm support call cites a rule. Check it only against the official sources you can search. " +
-      "Begin your reply with exactly one of SUPPORTED:, NOT_FOUND: or CONTRADICTED:, then in one or two short spoken " +
-      "sentences of plain text say what the official rule actually is. Use SUPPORTED only if an official source states " +
-      "this rule; if the cited article, section or deadline cannot be found, use NOT_FOUND.",
+    "A customer on a Paytm support call cites a rule, possibly in Hinglish. Check it only against the official sources you can search. " +
+      "Begin your reply with exactly one of SUPPORTED:, NOT_FOUND: or CONTRADICTED:, then in one or two short spoken English " +
+      "sentences say what the official rule actually is. SUPPORTED: an official source states this rule, even if it applies only " +
+      "to some transaction types (say which). CONTRADICTED: an official source sets a different rule for the same situation. " +
+      "NOT_FOUND: the cited article, section or deadline does not exist in official sources.",
     claim,
-    OFFICIAL_DOMAINS,
+    { allowedDomains: OFFICIAL_DOMAINS, maxSearches: 1 },
   );
-  const match = /^\s*(SUPPORTED|NOT_FOUND|CONTRADICTED)\s*:\s*/i.exec(answer);
-  const verdict = (match?.[1].toLowerCase() ?? "not_found") as ClaimVerdict;
+  // The answer has already had markdown stripped, so NOT_FOUND may arrive as NOTFOUND.
+  const match = /^\s*(SUPPORTED|NOT_?FOUND|CONTRADICTED)\s*:\s*/i.exec(answer);
+  const label = match?.[1].toLowerCase();
+  const verdict: ClaimVerdict = label === "supported" || label === "contradicted" ? label : "not_found";
   return {
     verdict: verdict === "supported" && sources.length === 0 ? "not_found" : verdict,
     answer: match ? answer.slice(match[0].length).trim() : answer,

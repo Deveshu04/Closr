@@ -1,3 +1,5 @@
+import type { ProfileKind } from "@/lib/types";
+
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
 async function post<T extends object>(url: string, body: unknown, fallbackError: string): Promise<Result<T>> {
@@ -20,8 +22,8 @@ async function post<T extends object>(url: string, body: unknown, fallbackError:
   }
 }
 
-export function startCall(phone?: string): Promise<Result<{ callRef?: string }>> {
-  return post("/api/call", phone ? { phone } : {}, "Couldn't start the call");
+export function startCall(phone: string, profile: ProfileKind): Promise<Result<{ callRef?: string }>> {
+  return post("/api/call", { phone, profile }, "Couldn't start the call");
 }
 
 export function decideApproval(id: string, decision: "approved" | "denied"): Promise<Result> {
@@ -33,6 +35,7 @@ export function transcriptUrl(callRef: string): string {
   return `/api/calls/${encodeURIComponent(callRef)}/transcript`;
 }
 
-export function resetDemo(): Promise<Result> {
-  return post("/api/reset", {}, "Couldn't reset the demo data");
+/** Puts every record back to its seeded state; call history and transcripts survive unless `clearHistory`. */
+export function resetDemo({ clearHistory = false }: { clearHistory?: boolean } = {}): Promise<Result> {
+  return post("/api/reset", { clearHistory }, "Couldn't reset the demo data");
 }

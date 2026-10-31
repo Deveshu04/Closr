@@ -1,8 +1,8 @@
 import {
   AudioLines,
   BadgeCheck,
+  BookCheck,
   Database,
-  Globe,
   Hand,
   Headset,
   LoaderCircle,
@@ -17,13 +17,13 @@ import type { Field } from "../lib/data";
 export const KIND_META: Record<MomentKind, { label: string; icon: LucideIcon; hint: string }> = {
   call: { label: "Call", icon: PhoneCall, hint: "The call starting or ending" },
   understood: { label: "Understood", icon: AudioLines, hint: "What it heard the customer ask for" },
-  lookup: { label: "Lookup", icon: Database, hint: "A record it pulled from CRM, Orders or Courier" },
+  lookup: { label: "Lookup", icon: Database, hint: "A record it pulled from UPI, Settlements, Soundbox and more" },
   policy: { label: "Policy check", icon: ScrollText, hint: "Each rule it checked before acting" },
   action: { label: "Action", icon: Stamp, hint: "Something it actually did, with the record id" },
   verified: { label: "Verified", icon: BadgeCheck, hint: "The result, re-read from the source system" },
-  approval: { label: "Approval", icon: Hand, hint: "Over its limit, so a human decides in one tap" },
-  search: { label: "Web search", icon: Globe, hint: "A quick answer from the web, with sources" },
-  escalated: { label: "Handoff", icon: Headset, hint: "Passed to a human with a written brief" },
+  approval: { label: "Approval", icon: Hand, hint: "Over its limit, so a Paytm specialist decides in one tap" },
+  search: { label: "Claim check", icon: BookCheck, hint: "A rule the customer cited, checked against RBI and NPCI" },
+  escalated: { label: "Handoff", icon: Headset, hint: "Passed to a human specialist with a written brief" },
 };
 
 export function isTrouble(status: MomentStatus): boolean {
@@ -75,7 +75,12 @@ export function FieldGrid({
       {fields.map((f) => (
         <div key={f.label} className="min-w-0">
           <dt className={`text-xs ${label}`}>{f.label}</dt>
-          <dd className={`figures break-words text-[15px] font-medium leading-snug ${value}`}>{f.value}</dd>
+          <dd
+            title={f.full ? `${f.label} ${f.full}` : undefined}
+            className={`figures break-words text-[15px] font-medium leading-snug ${value} ${f.full ? "cursor-help" : ""}`}
+          >
+            {f.value}
+          </dd>
         </div>
       ))}
     </dl>

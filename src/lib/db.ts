@@ -2,23 +2,29 @@ import fs from "node:fs";
 import path from "node:path";
 import { normalizePhone } from "@/lib/format";
 import { voiceSafeId } from "@/lib/ids";
-import { createSeed, DEMO_CUSTOMER_ID, type SeedData } from "@/lib/seed";
+import { chargesAfterReturn } from "@/lib/policy";
+import { createSeed, DEMO_PROFILES, type DeviceRecord, type SeedData } from "@/lib/seed";
 import type {
   Approval,
   CallRecord,
   ConsoleState,
   Customer,
-  Invoice,
+  Dispute,
+  Loan,
   Moment,
-  Order,
-  Refund,
+  Payout,
+  ProfileKind,
+  RentalCharge,
+  Reward,
+  Settlement,
   Ticket,
+  UpiTransaction,
 } from "@/lib/types";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 /** Bump when the stored shape or seed story changes, so an old db.json is re-seeded instead of misread. */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const MOMENT_HISTORY_LIMIT = 1000;
 
 interface DbState extends SeedData {
@@ -87,13 +93,18 @@ function newestFirst<T>(items: T[], timestamp: (item: T) => string): T[] {
   return [...items].sort((a, b) => timestamp(b).localeCompare(timestamp(a)));
 }
 
+function byId<T extends { id: string }>(items: T[], id: string): T | null {
+  return items.find((item) => item.id === id) ?? null;
+}
+
 function samePhone(a: string, b: string): boolean {
   const left = normalizePhone(a);
   return left !== "" && left === normalizePhone(b);
 }
 
 /** Re-seeds the demo data but keeps past calls and their moments: transcripts are the review record. */
-export function resetDb(): void {
+export function resetDb({ keepHistory = true }: { keepHistory?: boolean } = {}): void {
+  if (!keepHistory) return save(freshState());
   const { calls, moments } = read((state) => ({ calls: state.calls, moments: state.moments }));
   save({ ...freshState(), calls, moments });
 }
@@ -106,10 +117,15 @@ export function getState(): ConsoleState {
       moments: call ? state.moments.filter((moment) => moment.callRef === call.callRef) : [],
       approvals: newestFirst(state.approvals, (approval) => approval.createdAt),
       customers: state.customers,
-      orders: newestFirst(state.orders, (order) => order.placedAt),
-      refunds: newestFirst(state.refunds, (refund) => refund.createdAt),
+      transactions: newestFirst(state.transactions, (txn) => txn.at),
+      disputes: newestFirst(state.disputes, (dispute) => dispute.raisedAt),
+      settlements: newestFirst(state.settlements, (settlement) => settlement.forDate),
+      devices: state.devices,
+      rentalCharges: newestFirst(state.rentalCharges, (charge) => charge.chargedAt),
+      rewards: newestFirst(state.rewards, (reward) => reward.promisedBy),
+      loans: state.loans,
+      payouts: newestFirst(state.payouts, (payout) => payout.createdAt),
       tickets: newestFirst(state.tickets, (ticket) => ticket.updatedAt),
-      invoices: newestFirst(state.invoices, (invoice) => invoice.issuedAt),
     };
   });
 }
@@ -188,92 +204,200 @@ export function listMoments(callRef: string): Moment[] {
 // ---------- Customers ----------
 
 export function getCustomer(id: string): Customer | null {
-  return read((state) => state.customers.find((customer) => customer.id === id) ?? null);
+  return read((state) => byId(state.customers, id));
 }
 
 export function findCustomerByPhone(phone: string): Customer | null {
   return read((state) => state.customers.find((customer) => samePhone(customer.phone, phone)) ?? null);
 }
 
-/** Hands an unknown number to the seeded demo customer, so whoever is demoing hears their own story. */
-export function claimDemoCustomer(phone: string): Customer {
+/**
+ * Points the verified number at the demo profile the console chose. Both profiles are demoed on the
+ * same phone, so the other one is parked on its placeholder and the number resolves to exactly one.
+ */
+export function claimDemoCustomer(phone: string, kind: ProfileKind): Customer {
   return write((state) => {
-    const owner = state.customers.find((customer) => samePhone(customer.phone, phone));
-    if (owner) return owner;
-    const demo = state.customers.find((customer) => customer.id === DEMO_CUSTOMER_ID);
-    if (!demo) throw new Error("Seed data has no demo customer");
-    demo.phone = normalizePhone(phone);
-    return demo;
+    let chosen: Customer | null = null;
+    for (const [profile, demo] of Object.entries(DEMO_PROFILES)) {
+      const customer = byId(state.customers, demo.id);
+      if (!customer) continue;
+      if (profile === kind) {
+        customer.phone = normalizePhone(phone);
+        chosen = customer;
+      } else {
+        customer.phone = demo.placeholderPhone;
+      }
+    }
+    if (!chosen) throw new Error(`Seed data has no demo ${kind} profile`);
+    return chosen;
   });
 }
 
-// ---------- Orders ----------
+// ---------- UPI transactions and disputes ----------
 
-export function getOrder(id: string): Order | null {
-  return read((state) => state.orders.find((order) => order.id === id) ?? null);
+export function getTransaction(id: string): UpiTransaction | null {
+  return read((state) => byId(state.transactions, id));
 }
 
-/** Newest first; all orders when no customer is given. */
-export function listOrders(customerId?: string): Order[] {
+export function listTransactions(customerId: string): UpiTransaction[] {
   return read((state) =>
     newestFirst(
-      state.orders.filter((order) => !customerId || order.customerId === customerId),
-      (order) => order.placedAt,
+      state.transactions.filter((txn) => txn.customerId === customerId),
+      (txn) => txn.at,
     ),
   );
 }
 
-export function updateOrder(id: string, patch: Partial<Omit<Order, "id">>): Order | null {
-  return write((state) => {
-    const order = state.orders.find((candidate) => candidate.id === id);
-    if (!order) return null;
-    Object.assign(order, patch);
-    return order;
-  });
-}
-
-// ---------- Refunds ----------
-
-export function getRefund(id: string): Refund | null {
-  return read((state) => state.refunds.find((refund) => refund.id === id) ?? null);
-}
-
-export function findRefundForOrder(orderId: string): Refund | null {
-  return read((state) => state.refunds.find((refund) => refund.orderId === orderId) ?? null);
-}
-
-export function listRefunds(customerId: string): Refund[] {
-  return read((state) => {
-    const orderIds = new Set(
-      state.orders.filter((order) => order.customerId === customerId).map((order) => order.id),
-    );
-    return state.refunds.filter((refund) => orderIds.has(refund.orderId));
-  });
+export function getDispute(id: string): Dispute | null {
+  return read((state) => byId(state.disputes, id));
 }
 
 /**
- * One refund record per order. The existence check and the insert share a single write,
- * so two overlapping requests for the same order can't both create one.
+ * One dispute per transaction. The check, the insert and the link back to the transaction share
+ * a single write, so two overlapping requests can't raise two disputes.
  */
-export function insertRefundOnce(refund: Refund): { refund: Refund; created: boolean } {
+export function raiseDisputeOnce(dispute: Dispute): { dispute: Dispute; created: boolean } | null {
   return write((state) => {
-    const existing = state.refunds.find((candidate) => candidate.orderId === refund.orderId);
-    if (existing) return { refund: existing, created: false };
-    state.refunds.push(refund);
-    return { refund, created: true };
+    const txn = byId(state.transactions, dispute.txnId);
+    if (!txn) return null;
+    const existing = txn.disputeId ? byId(state.disputes, txn.disputeId) : null;
+    if (existing) return { dispute: existing, created: false };
+    state.disputes.push(dispute);
+    txn.disputeId = dispute.id;
+    return { dispute, created: true };
   });
 }
 
-/** Moves a refund out of pending_approval; returns null if it was already settled. */
-export function settleRefund(
-  id: string,
-  outcome: { status: "processed"; utr: string; expectedBy: string } | { status: "rejected" },
-): Refund | null {
+// ---------- Rewards and loans ----------
+
+export function getReward(id: string): Reward | null {
+  return read((state) => byId(state.rewards, id));
+}
+
+export function listRewards(customerId: string): Reward[] {
+  return read((state) =>
+    newestFirst(
+      state.rewards.filter((reward) => reward.customerId === customerId),
+      (reward) => reward.promisedBy,
+    ),
+  );
+}
+
+export function getLoan(id: string): Loan | null {
+  return read((state) => byId(state.loans, id));
+}
+
+export function listLoans(customerId: string): Loan[] {
+  return read((state) => state.loans.filter((loan) => loan.customerId === customerId));
+}
+
+// ---------- Settlements ----------
+
+export function getSettlement(id: string): Settlement | null {
+  return read((state) => byId(state.settlements, id));
+}
+
+/** Newest business day first. */
+export function listSettlements(customerId: string): Settlement[] {
+  return read((state) =>
+    newestFirst(
+      state.settlements.filter((settlement) => settlement.customerId === customerId),
+      (settlement) => settlement.forDate,
+    ),
+  );
+}
+
+// ---------- Devices and rent ----------
+
+export function getDevice(id: string): DeviceRecord | null {
+  return read((state) => byId(state.devices, id));
+}
+
+export function listDevices(customerId: string): DeviceRecord[] {
+  return read((state) => state.devices.filter((device) => device.customerId === customerId));
+}
+
+export function updateDevice(id: string, patch: Partial<Omit<DeviceRecord, "id" | "customerId">>): DeviceRecord | null {
   return write((state) => {
-    const refund = state.refunds.find((candidate) => candidate.id === id);
-    if (!refund || refund.status !== "pending_approval") return null;
-    Object.assign(refund, outcome);
-    return refund;
+    const device = byId(state.devices, id);
+    if (!device) return null;
+    Object.assign(device, patch);
+    return device;
+  });
+}
+
+/** Oldest billing month first. */
+export function listRentalCharges(deviceId: string): RentalCharge[] {
+  return read((state) =>
+    state.rentalCharges
+      .filter((charge) => charge.deviceId === deviceId)
+      .sort((a, b) => a.period.localeCompare(b.period)),
+  );
+}
+
+// ---------- Payouts ----------
+
+// A payout and its effect on the subject land in the same write, so the ledger can never say
+// "paid" while the cashback, rent or settlement it paid for still looks unpaid.
+function applyPayout(state: DbState, payout: Payout): void {
+  const now = new Date().toISOString();
+  switch (payout.kind) {
+    case "cashback": {
+      const reward = byId(state.rewards, payout.subjectId);
+      if (reward) Object.assign(reward, { status: "credited", creditedAt: now, payoutId: payout.id });
+      return;
+    }
+    case "rent_refund": {
+      const device = byId(state.devices, payout.subjectId);
+      if (!device) return;
+      for (const charge of chargesAfterReturn(device, state.rentalCharges)) {
+        if (charge.status !== "charged") continue;
+        charge.status = "refunded";
+        charge.payoutId = payout.id;
+      }
+      device.rental.billingActive = false;
+      return;
+    }
+    case "settlement_retry": {
+      const settlement = byId(state.settlements, payout.subjectId);
+      if (!settlement) return;
+      Object.assign(settlement, { status: "settled", utr: payout.rrn, settledAt: now, retries: settlement.retries + 1 });
+      delete settlement.failure;
+      return;
+    }
+  }
+}
+
+export function getPayout(id: string): Payout | null {
+  return read((state) => byId(state.payouts, id));
+}
+
+export function findPayout(kind: Payout["kind"], subjectId: string): Payout | null {
+  return read((state) => state.payouts.find((payout) => payout.kind === kind && payout.subjectId === subjectId) ?? null);
+}
+
+/** One payout per idempotency key; a repeat returns the first record untouched. */
+export function recordPayout(payout: Payout): { payout: Payout; created: boolean } {
+  return write((state) => {
+    const existing = state.payouts.find((candidate) => candidate.idempotencyKey === payout.idempotencyKey);
+    if (existing) return { payout: existing, created: false };
+    state.payouts.push(payout);
+    if (payout.status === "processed") applyPayout(state, payout);
+    return { payout, created: true };
+  });
+}
+
+/** Moves a payout out of pending_approval; returns null if it was already settled. */
+export function settlePayout(
+  id: string,
+  outcome: { status: "processed"; rrn: string; expectedBy?: string } | { status: "rejected" },
+): Payout | null {
+  return write((state) => {
+    const payout = byId(state.payouts, id);
+    if (!payout || payout.status !== "pending_approval") return null;
+    Object.assign(payout, outcome);
+    if (outcome.status === "processed") applyPayout(state, payout);
+    return payout;
   });
 }
 
@@ -293,13 +417,13 @@ export function createApproval(input: Omit<Approval, "id" | "status" | "createdA
 }
 
 export function getApproval(id: string): Approval | null {
-  return read((state) => state.approvals.find((approval) => approval.id === id) ?? null);
+  return read((state) => byId(state.approvals, id));
 }
 
 /** Only a pending approval changes; deciding twice returns the first decision untouched. */
 export function decideApproval(id: string, decision: "approved" | "denied"): Approval | null {
   return write((state) => {
-    const approval = state.approvals.find((candidate) => candidate.id === id);
+    const approval = byId(state.approvals, id);
     if (!approval) return null;
     if (approval.status === "pending") {
       approval.status = decision;
@@ -310,6 +434,10 @@ export function decideApproval(id: string, decision: "approved" | "denied"): App
 }
 
 // ---------- Tickets ----------
+
+export function getTicket(id: string): Ticket | null {
+  return read((state) => byId(state.tickets, id));
+}
 
 export function listTickets(customerId: string): Ticket[] {
   return read((state) =>
@@ -332,25 +460,9 @@ export function createTicket(input: Omit<Ticket, "id" | "createdAt" | "updatedAt
 
 export function updateTicket(id: string, patch: Partial<Omit<Ticket, "id" | "createdAt">>): Ticket | null {
   return write((state) => {
-    const ticket = state.tickets.find((candidate) => candidate.id === id);
+    const ticket = byId(state.tickets, id);
     if (!ticket) return null;
     Object.assign(ticket, patch, { updatedAt: new Date().toISOString() });
     return ticket;
-  });
-}
-
-// ---------- Invoices ----------
-
-export function getInvoice(id: string): Invoice | null {
-  return read((state) => state.invoices.find((invoice) => invoice.id === id) ?? null);
-}
-
-export function markInvoiceSent(id: string, sentTo: string[]): Invoice | null {
-  return write((state) => {
-    const invoice = state.invoices.find((candidate) => candidate.id === id);
-    if (!invoice) return null;
-    invoice.sentAt = new Date().toISOString();
-    invoice.sentTo = sentTo;
-    return invoice;
   });
 }

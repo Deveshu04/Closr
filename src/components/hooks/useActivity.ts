@@ -14,19 +14,23 @@ export interface TabFocus {
 
 export const PULSE_MS = 6000;
 const KEEP_MS = 20000;
-const FOCUS_KINDS: ReadonlySet<MomentKind> = new Set(["action", "verified", "escalated"]);
+const FOCUS_KINDS: ReadonlySet<MomentKind> = new Set(["lookup", "action", "verified", "escalated"]);
 
 function recordSignatures(state: ConsoleState): Map<string, string> {
   const out = new Map<string, string>();
-  for (const o of state.orders) {
-    const { shipment, ...rest } = o;
-    out.set(o.id, JSON.stringify(rest));
-    if (shipment?.awb) out.set(shipment.awb, JSON.stringify(shipment));
-  }
-  for (const r of state.refunds) out.set(r.id, JSON.stringify(r));
-  for (const t of state.tickets) out.set(t.id, JSON.stringify(t));
-  for (const i of state.invoices) out.set(i.id, JSON.stringify(i));
-  for (const c of state.customers) out.set(c.id, JSON.stringify(c));
+  const collections: { id: string }[][] = [
+    state.customers,
+    state.transactions,
+    state.disputes,
+    state.settlements,
+    state.devices,
+    state.rentalCharges,
+    state.rewards,
+    state.loans,
+    state.payouts,
+    state.tickets,
+  ];
+  for (const rows of collections) for (const row of rows) out.set(row.id, JSON.stringify(row));
   return out;
 }
 

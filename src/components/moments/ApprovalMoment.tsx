@@ -1,9 +1,10 @@
-import { Hand } from "lucide-react";
+import { Hand, UserRoundCheck } from "lucide-react";
 import type { Moment } from "@/lib/types";
 import { ApprovalButtons } from "../ApprovalButtons";
 import { type ApprovalControls, approvalForMoment, effectiveStatus } from "../hooks/useApprovals";
 import { inr } from "../lib/format";
 import { pickNumber, pickString } from "../lib/data";
+import { PAYOUT_KIND } from "../lib/records";
 import { StatusNote } from "./shared";
 
 /** Over the agent's limit: the brief, the amount, and the human's one-tap decision. */
@@ -14,7 +15,8 @@ export function ApprovalMoment({ moment, controls }: { moment: Moment; controls:
   const amount = approval?.amount ?? pickNumber(moment.data, "amount");
   const brief = approval?.brief ?? pickString(moment.data, "brief") ?? moment.detail;
   const reason = approval?.reason ?? pickString(moment.data, "reason");
-  const orderId = approval?.orderId ?? pickString(moment.data, "orderId");
+  const subjectId = approval?.subjectId ?? pickString(moment.data, "subjectId");
+  const kind = approval ? PAYOUT_KIND[approval.kind] : undefined;
 
   return (
     <article
@@ -23,11 +25,15 @@ export function ApprovalMoment({ moment, controls }: { moment: Moment; controls:
       }`}
     >
       <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-[1_1_12rem]">
           <p className="flex items-center gap-1.5 text-[13px] font-semibold text-amber">
             <Hand aria-hidden size={14} strokeWidth={2.25} />
-            {waiting ? "Needs your approval" : "Approval"}
-            {orderId && <span className="font-medium text-muted">for {orderId}</span>}
+            {waiting ? "Needs a specialist's approval" : "Specialist approval"}
+            {(kind || subjectId) && (
+              <span className="font-medium text-muted">
+                · {[kind, subjectId].filter(Boolean).join(" for ")}
+              </span>
+            )}
           </p>
           <h3 className="mt-1 text-[1.25rem] font-semibold leading-tight text-ink">{moment.title}</h3>
         </div>
@@ -48,6 +54,12 @@ export function ApprovalMoment({ moment, controls }: { moment: Moment; controls:
           <StatusNote status={moment.status} />
         )}
       </div>
+      {waiting && (
+        <p className="mt-3 flex items-center gap-1.5 text-[13px] text-muted">
+          <UserRoundCheck aria-hidden size={14} className="text-amber" />
+          Closr has told the customer a specialist is approving this. The call stays open.
+        </p>
+      )}
     </article>
   );
 }

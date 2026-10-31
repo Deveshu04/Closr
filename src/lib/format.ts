@@ -24,6 +24,10 @@ const dateTimeFormat = new Intl.DateTimeFormat("en-IN", {
   minute: "2-digit",
   hour12: true,
 });
+const dayMonthFormat = new Intl.DateTimeFormat("en-IN", { timeZone: IST, day: "numeric", month: "long" });
+const timeFormat = new Intl.DateTimeFormat("en-IN", { timeZone: IST, hour: "numeric", minute: "2-digit", hour12: true });
+const hourFormat = new Intl.DateTimeFormat("en-GB", { timeZone: IST, hour: "2-digit", hourCycle: "h23" });
+const monthFormat = new Intl.DateTimeFormat("en-IN", { timeZone: "UTC", month: "long", year: "numeric" });
 
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -36,6 +40,25 @@ export function atIst(dateKey: string, hour = 12, minute = 0): Date {
   const hh = String(hour).padStart(2, "0");
   const mm = String(minute).padStart(2, "0");
   return new Date(`${dateKey}T${hh}:${mm}:00${IST_OFFSET}`);
+}
+
+export function endOfIstDay(dateKey: string): Date {
+  return new Date(`${dateKey}T23:59:59.999${IST_OFFSET}`);
+}
+
+export function istHour(date: Date): number {
+  return Number(hourFormat.format(date));
+}
+
+/** Billing month in India as YYYY-MM. */
+export function monthKey(date: Date = new Date()): string {
+  return istDateKey(date).slice(0, 7);
+}
+
+export function shiftMonthKey(key: string, months: number): string {
+  const [year, month] = key.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1 + months, 1));
+  return shifted.toISOString().slice(0, 7);
 }
 
 function keyToUtc(dateKey: string): number {
@@ -91,6 +114,21 @@ export function formatShortDate(value: string | Date): string {
 /** "Saturday, 25 October" */
 export function formatLongDate(value: string | Date): string {
   return longDateFormat.format(toDate(value));
+}
+
+/** "25 October" */
+export function formatDayMonth(value: string | Date): string {
+  return dayMonthFormat.format(toDate(value));
+}
+
+/** "4:12 pm" */
+export function formatTime(value: string | Date): string {
+  return timeFormat.format(toDate(value));
+}
+
+/** "2026-09" → "September 2026" */
+export function formatMonth(key: string): string {
+  return monthFormat.format(new Date(`${key}-01T00:00:00Z`));
 }
 
 /** "25 Oct, 4:12 pm" */

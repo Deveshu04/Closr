@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { ApprovalButtons } from "./ApprovalButtons";
 import { type ApprovalControls, effectiveStatus } from "./hooks/useApprovals";
 import { inr } from "./lib/format";
+import { PAYOUT_KIND } from "./lib/records";
 
 /** Pending approvals pinned to the corner of the screen, so a human can answer from anywhere. */
 export function ApprovalToast({ controls }: { controls: ApprovalControls }) {
@@ -34,9 +35,11 @@ export function ApprovalToast({ controls }: { controls: ApprovalControls }) {
                 <Hand aria-hidden size={18} strokeWidth={2.25} />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-amber">Closr needs your approval</p>
+                <p className="text-sm font-semibold text-amber">Closr needs a specialist&apos;s approval</p>
                 <p className="mt-0.5 line-clamp-3 text-[15px] leading-snug text-ink">{a.brief || a.reason}</p>
-                {a.orderId && <p className="figures mt-0.5 text-xs text-muted">{a.orderId}</p>}
+                <p className="figures mt-1 text-xs text-muted">
+                  {PAYOUT_KIND[a.kind] ?? a.kind} · {a.subjectId}
+                </p>
               </div>
               <p className="figures shrink-0 font-serif text-2xl font-semibold leading-none text-ink">{inr(a.amount)}</p>
             </div>

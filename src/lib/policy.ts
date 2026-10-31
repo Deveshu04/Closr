@@ -1,42 +1,57 @@
 import {
-  addHours,
+  addBusinessDays,
+  atIst,
   calendarDaysBetween,
-  daysBetweenKeys,
+  endOfIstDay,
   formatDateTime,
   formatLongDate,
+  formatMonth,
   formatRupees,
   formatShortDate,
-  hoursSince,
+  formatTime,
+  istDateKey,
+  lastDigits,
+  shiftDateKey,
 } from "@/lib/format";
-import type { Address, Customer, Order, OrderStatus, PolicyDecision, Refund } from "@/lib/types";
+import type { DeviceRecord } from "@/lib/seed";
+import type { Customer, Loan, PolicyDecision, RentalCharge, Reward, Settlement, UpiTransaction } from "@/lib/types";
 
-export const RETURN_WINDOW_DAYS = 30;
-export const QC_SLA_HOURS = 48;
-export const AUTO_APPROVE_LIMIT = 5_000;
-export const RESCHEDULE_WINDOW_DAYS = 7;
 export const ESCALATION_CALLBACK_HOURS = 2;
 
-/** The courier event that proves a reverse pickup happened; seed data and the pickup check share it. */
-export const RETURN_PICKUP_SCAN = "Return picked up";
+// RBI's turn-around-time circular (DPSS.CO.PD No.629/02.01.014/2019-20) counts T as the calendar date of the
+// transaction, and makes the bank pay the delay compensation on its own, without the customer complaining.
+export const UPI_REVERSAL_TAT_DAYS = { p2p: 1, p2m: 5 } as const;
+export const UPI_DELAY_COMPENSATION_PER_DAY = 100;
+export const UDIR_RESOLUTION_WORKING_DAYS = { min: 3, max: 5 } as const;
 
-export const DELIVERY_SLOTS = [
-  { label: "10 AM – 1 PM", startHour: 10, endHour: 13 },
-  { label: "1 PM – 4 PM", startHour: 13, endHour: 16 },
-  { label: "4 PM – 7 PM", startHour: 16, endHour: 19 },
-  { label: "7 PM – 9 PM", startHour: 19, endHour: 21 },
-] as const;
+export const CASHBACK_AUTO_LIMIT = 500;
+export const CASHBACK_CLAIM_WINDOW_DAYS = 30;
 
-export type DeliverySlotLabel = (typeof DELIVERY_SLOTS)[number]["label"];
+export const SETTLEMENT_RETRY_AUTO_LIMIT = 50_000;
+export const SETTLEMENT_MAX_RETRIES = 3;
 
-const RESCHEDULABLE: OrderStatus[] = ["placed", "shipped", "out_for_delivery"];
-const ADDRESS_EDITABLE: OrderStatus[] = ["placed", "shipped"];
+export const RENT_REFUND_AUTO_LIMIT = 1_000;
+
+/** Under the RBI Integrated Ombudsman Scheme a customer can escalate once the lender has had 30 days. */
+export const LENDER_GRIEVANCE_DAYS = 30;
+
+export const REPLACEMENT_DELIVERY_WORKING_DAYS = 2;
+
+type OnFail = "deny" | "needs_approval";
 
 interface RuleResult {
   rule: string;
   passed: boolean;
   note: string;
   /** What a failure of this rule means: a hard stop, or a case a person should look at. */
-  onFail: "deny" | "needs_approval";
+  onFail: OnFail;
+}
+
+function rule(name: string, onFail: OnFail = "deny") {
+  return {
+    pass: (note: string): RuleResult => ({ rule: name, passed: true, note, onFail }),
+    fail: (note: string): RuleResult => ({ rule: name, passed: false, note, onFail }),
+  };
 }
 
 function decide(results: RuleResult[], allowReasons: string[]): PolicyDecision {
@@ -55,260 +70,364 @@ function decide(results: RuleResult[], allowReasons: string[]): PolicyDecision {
   return {
     outcome,
     reasons,
-    checks: results.map(({ rule, passed, note }) => ({ rule, passed, note })),
+    checks: results.map(({ rule: name, passed, note }) => ({ rule: name, passed, note })),
   };
 }
 
-export function humanStatus(status: OrderStatus): string {
-  return status.replace(/_/g, " ");
-}
-
-export function refundMethodFor(order: Order): string {
-  switch (order.payment.method) {
-    case "UPI":
-      return "UPI (original source)";
-    case "Card":
-      return "Card (original source)";
-    case "NetBanking":
-      return "Bank account (original source)";
-    case "COD":
-      return "IMPS to bank account on file";
-  }
-}
-
-export function refundSettlementBusinessDays(order: Order): number {
-  return order.payment.method === "UPI" ? 3 : 5;
-}
-
-// ---------- Refunds ----------
-
-function checkPickup(order: Order): RuleResult {
-  const rule = "Return picked up by courier";
-  const onFail = "deny";
-  if (!order.return) return { rule, passed: false, note: "No return has been raised for this order", onFail };
-  if (!order.return.pickedAt) return { rule, passed: false, note: "Return pickup hasn't happened yet", onFail };
-
-  const scan = order.shipment.events.find((event) => event.status === RETURN_PICKUP_SCAN);
-  if (!scan) return { rule, passed: false, note: "No courier scan confirms the pickup", onFail };
-  return {
-    rule,
-    passed: true,
-    note: `${order.shipment.courier} pickup scan on ${formatDateTime(scan.at)}`,
-    onFail,
-  };
-}
-
-function checkReturnWindow(order: Order, now: Date): RuleResult {
-  const rule = `Raised within ${RETURN_WINDOW_DAYS} days of delivery`;
-  const onFail = "deny";
-  if (!order.deliveredAt) return { rule, passed: false, note: "Order hasn't been delivered", onFail };
-
-  const raisedAt = order.return?.requestedAt ?? now;
-  const days = calendarDaysBetween(order.deliveredAt, raisedAt);
-  return days <= RETURN_WINDOW_DAYS
-    ? { rule, passed: true, note: `Raised ${days} days after delivery`, onFail }
-    : {
-        rule,
-        passed: false,
-        note: `Raised ${days} days after delivery, outside the ${RETURN_WINDOW_DAYS}-day window`,
-        onFail,
-      };
-}
-
-function checkNoPriorRefund(order: Order, existingRefunds: Refund[]): RuleResult {
-  const rule = "No refund already on this order";
-  const onFail = "deny";
-  const prior = existingRefunds.find((refund) => refund.orderId === order.id);
-  if (!prior) return { rule, passed: true, note: "No earlier refund on this order", onFail };
-
-  const note =
-    prior.status === "processed"
-      ? `Already refunded (${prior.id}) on ${formatShortDate(prior.createdAt)}`
-      : prior.status === "pending_approval"
-        ? `Refund ${prior.id} is already awaiting approval`
-        : `A refund was reviewed and declined on ${formatShortDate(prior.createdAt)}`;
-  return { rule, passed: false, note, onFail };
+function withinLimit(amount: number, limit: number, what: string): RuleResult {
+  const check = rule(`Within the ${formatRupees(limit)} auto-approve limit`, "needs_approval");
+  return amount <= limit
+    ? check.pass(`${formatRupees(amount)} ${what} is within the ${formatRupees(limit)} limit`)
+    : check.fail(`${formatRupees(amount)} ${what} is above the ${formatRupees(limit)} auto-approve limit`);
 }
 
 // A flag routes the case to a person instead of denying it: flags are heuristics, and a
-// wrongly flagged customer with a genuine return should still get their money.
-function checkAbuseFlags(customer: Customer): RuleResult {
-  const rule = "No abuse flags on the account";
+// wrongly flagged customer with a genuine claim should still get their money.
+function noRiskFlags(customer: Customer): RuleResult {
+  const check = rule("No risk flags on the account", "needs_approval");
   return customer.flags.length === 0
-    ? { rule, passed: true, note: "Clean account history", onFail: "needs_approval" }
-    : {
-        rule,
-        passed: false,
-        note: `Account flagged ${customer.flags.join(", ")}; a person must review instead of auto-approving`,
-        onFail: "needs_approval",
-      };
+    ? check.pass("Clean account history")
+    : check.fail(`Account flagged ${customer.flags.join(", ")}; a specialist must review it`);
 }
 
-// Past the SLA the delay is ours, not the customer's, so the courier's pickup scan is
-// enough proof to refund without waiting on the warehouse.
-function checkQc(order: Order, now: Date): RuleResult {
-  const rule = `QC passed, or pending past the ${QC_SLA_HOURS}h SLA`;
-  const onFail = "deny";
-  const returned = order.return;
-  if (!returned) return { rule, passed: false, note: "No returned item to inspect", onFail };
-  if (!returned.pickedAt) return { rule, passed: false, note: "Item hasn't reached the warehouse yet", onFail };
+// ---------- UPI failed debits ----------
 
-  switch (returned.qcStatus) {
-    case "passed":
-      return {
-        rule,
-        passed: true,
-        note: `QC passed on ${formatShortDate(returned.qcSince ?? returned.pickedAt)}`,
-        onFail,
-      };
+export function reversalTatDays(txn: Pick<UpiTransaction, "kind">): number {
+  return UPI_REVERSAL_TAT_DAYS[txn.kind];
+}
+
+/** End of day T+1 (person to person) or T+5 (person to merchant), in IST. */
+export function reversalDeadline(txn: Pick<UpiTransaction, "kind" | "at">): Date {
+  return endOfIstDay(shiftDateKey(istDateKey(new Date(txn.at)), reversalTatDays(txn)));
+}
+
+export function reversalDaysLate(txn: UpiTransaction, now: Date = new Date()): number {
+  const deadline = txn.reversal?.deadline ?? reversalDeadline(txn).toISOString();
+  return Math.max(0, calendarDaysBetween(deadline, txn.reversal?.reversedAt ?? now));
+}
+
+export function bankCompensationDue(txn: UpiTransaction, now: Date = new Date()): number {
+  return reversalDaysLate(txn, now) * UPI_DELAY_COMPENSATION_PER_DAY;
+}
+
+export function udirExpectedBy(raisedAt: Date): Date {
+  return addBusinessDays(raisedAt, UDIR_RESOLUTION_WORKING_DAYS.max);
+}
+
+export function evaluateDispute(txn: UpiTransaction, bankName: string, now: Date = new Date()): PolicyDecision {
+  const payee = txn.counterparty.name;
+  const debit = rule("The caller's own debit");
+  const stuck = rule("Money left the account but never reached the payee");
+  const open = rule("No dispute already open on this payment");
+
+  const results: RuleResult[] = [
+    txn.direction === "debit"
+      ? debit.pass(`${formatRupees(txn.amount)} paid to ${payee}`)
+      : debit.fail("This is a payment the caller received; only the payer's bank can dispute it"),
+  ];
+
+  switch (txn.status) {
+    case "debited_not_credited":
+      results.push(stuck.pass(`Debited from ${bankName}, not credited to ${payee}`));
+      break;
+    case "pending":
+      results.push(stuck.pass(`Still pending between ${bankName} and ${payee}'s bank`));
+      break;
+    case "reversed":
+      results.push(
+        stuck.fail(
+          `Already reversed by ${bankName} on ${formatDateTime(txn.reversal?.reversedAt ?? txn.at)}` +
+            (txn.reversal?.rrn ? ` (reversal ref ••${lastDigits(txn.reversal.rrn)})` : ""),
+        ),
+      );
+      break;
+    case "success":
+      results.push(stuck.fail(`Completed: the money reached ${payee} (RRN ••${lastDigits(txn.rrn)})`));
+      break;
     case "failed":
-      return { rule, passed: false, note: "Returned item failed the quality check", onFail };
-    case "awaiting_pickup":
-      return { rule, passed: false, note: "Item hasn't reached the warehouse yet", onFail };
-    case "pending": {
-      const since = returned.qcSince ?? returned.pickedAt;
-      if (hoursSince(since, now) > QC_SLA_HOURS) {
-        const days = calendarDaysBetween(since, now);
-        return {
-          rule,
-          passed: true,
-          note: `QC pending ${days} days, past the ${QC_SLA_HOURS}h SLA; refund released on pickup proof`,
-          onFail,
-        };
-      }
-      return {
-        rule,
-        passed: false,
-        note: `Quality check in progress, due by ${formatDateTime(addHours(since, QC_SLA_HOURS))}`,
-        onFail,
-      };
-    }
+      results.push(stuck.fail("Failed before any money was debited; nothing to recover"));
+      break;
   }
+
+  results.push(txn.disputeId ? open.fail(`Dispute ${txn.disputeId} is already raised`) : open.pass("None raised yet"));
+
+  const stillStuck = txn.status === "debited_not_credited" || txn.status === "pending";
+  if (stillStuck) {
+    const tat = reversalTatDays(txn);
+    const deadline = txn.reversal?.deadline ?? reversalDeadline(txn).toISOString();
+    const late = reversalDaysLate(txn, now);
+    const clock = rule(`RBI turn-around time: auto-reversal by T+${tat}`);
+    results.push(
+      clock.pass(
+        late > 0
+          ? `${bankName} missed the ${formatShortDate(deadline)} deadline by ${late} day${late === 1 ? "" : "s"} and owes ` +
+              `${formatRupees(late * UPI_DELAY_COMPENSATION_PER_DAY)} compensation, paid by the bank without a claim`
+          : `${bankName} must reverse it by ${formatLongDate(deadline)}; after that the bank pays ` +
+              `${formatRupees(UPI_DELAY_COMPENSATION_PER_DAY)} a day on its own`,
+      ),
+    );
+  }
+
+  const allowReasons = results.filter((result) => result.passed).slice(-1).map((result) => result.note);
+  return decide(results, allowReasons);
 }
 
-function checkAutoApproveLimit(order: Order): RuleResult {
-  const rule = `Within the ${formatRupees(AUTO_APPROVE_LIMIT)} auto-approve limit`;
-  return order.total <= AUTO_APPROVE_LIMIT
-    ? {
-        rule,
-        passed: true,
-        note: `${formatRupees(order.total)} is within the ${formatRupees(AUTO_APPROVE_LIMIT)} auto-approve limit`,
-        onFail: "needs_approval",
-      }
-    : {
-        rule,
-        passed: false,
-        note: `${formatRupees(order.total)} is above the ${formatRupees(AUTO_APPROVE_LIMIT)} auto-approve limit`,
-        onFail: "needs_approval",
-      };
-}
+// ---------- Cashback ----------
 
-export function evaluateRefund(
-  order: Order,
+export function evaluateCashback(
+  reward: Reward,
+  txn: UpiTransaction | null,
   customer: Customer,
-  existingRefunds: Refund[],
   now: Date = new Date(),
 ): PolicyDecision {
-  const pickup = checkPickup(order);
-  const qc = checkQc(order, now);
-  const limit = checkAutoApproveLimit(order);
+  const succeeded = rule("Qualifying payment succeeded");
+  const valid = rule("Offer is valid");
+  const notCredited = rule("Not already credited");
+  const due = rule("Promised credit date has passed");
+  const window = rule(`Claimed within ${CASHBACK_CLAIM_WINDOW_DAYS} days of the payment`);
+
+  const daysSincePayment = txn ? calendarDaysBetween(txn.at, now) : Number.POSITIVE_INFINITY;
+  const daysLate = calendarDaysBetween(reward.promisedBy, now);
+  const limit = withinLimit(reward.amount, CASHBACK_AUTO_LIMIT, "cashback");
+
   return decide(
     [
-      pickup,
-      checkReturnWindow(order, now),
-      checkNoPriorRefund(order, existingRefunds),
-      checkAbuseFlags(customer),
-      qc,
+      txn?.status === "success"
+        ? succeeded.pass(`${formatRupees(txn.amount)} to ${txn.counterparty.name} on ${formatShortDate(txn.at)} succeeded`)
+        : succeeded.fail(txn ? `The payment is ${txn.status.replace(/_/g, " ")}, so the offer never triggered` : "No qualifying payment on record"),
+      reward.status === "expired" ? valid.fail(`${reward.offer} has expired`) : valid.pass(reward.offer),
+      reward.status === "credited" || reward.payoutId
+        ? notCredited.fail(`Already credited${reward.creditedAt ? ` on ${formatShortDate(reward.creditedAt)}` : ""}`)
+        : notCredited.pass(reward.failureNote ? `Not credited: ${reward.failureNote}` : "Not credited yet"),
+      new Date(reward.promisedBy) <= now
+        ? due.pass(`Promised by ${formatShortDate(reward.promisedBy)}; ${daysLate} day${daysLate === 1 ? "" : "s"} late`)
+        : due.fail(`On track: it is due by ${formatLongDate(reward.promisedBy)} and credits automatically`),
+      daysSincePayment <= CASHBACK_CLAIM_WINDOW_DAYS
+        ? window.pass(`Payment was ${daysSincePayment} days ago`)
+        : window.fail(`Payment was more than ${CASHBACK_CLAIM_WINDOW_DAYS} days ago`),
+      noRiskFlags(customer),
       limit,
     ],
-    [pickup.note, qc.note, limit.note],
+    [limit.note],
   );
 }
 
-// ---------- Delivery changes ----------
+// ---------- Settlements ----------
 
-export function evaluateReschedule(
-  order: Order,
-  request: { date: string; slot: string | null },
-  today: string,
-): PolicyDecision {
-  const notDelivered: RuleResult = RESCHEDULABLE.includes(order.status)
-    ? { rule: "Not yet delivered", passed: true, note: `Order is ${humanStatus(order.status)}`, onFail: "deny" }
-    : {
-        rule: "Not yet delivered",
-        passed: false,
-        note: `Order is already ${humanStatus(order.status)}`,
-        onFail: "deny",
-      };
+const BANK_SIDE_FAILURES = new Set(["ACCOUNT_CLOSED", "ACCOUNT_FROZEN"]);
 
-  const daysOut = daysBetweenKeys(today, request.date);
-  const windowRule = `Date within the next ${RESCHEDULE_WINDOW_DAYS} days`;
-  const inWindow: RuleResult =
-    daysOut < 1
-      ? { rule: windowRule, passed: false, note: "Earliest possible date is tomorrow", onFail: "deny" }
-      : daysOut > RESCHEDULE_WINDOW_DAYS
-        ? {
-            rule: windowRule,
-            passed: false,
-            note: `${formatLongDate(request.date)} is beyond the ${RESCHEDULE_WINDOW_DAYS}-day window`,
-            onFail: "deny",
-          }
-        : { rule: windowRule, passed: true, note: `${formatLongDate(request.date)}`, onFail: "deny" };
-
-  const offered = DELIVERY_SLOTS.some((slot) => slot.label === request.slot);
-  const slotAvailable: RuleResult = offered
-    ? { rule: "Slot offered by courier", passed: true, note: request.slot ?? "", onFail: "deny" }
-    : {
-        rule: "Slot offered by courier",
-        passed: false,
-        note: `Available slots are ${DELIVERY_SLOTS.map((slot) => slot.label).join(", ")}`,
-        onFail: "deny",
-      };
-
-  return decide([notDelivered, inWindow, slotAvailable], [inWindow.note, slotAvailable.note]);
+/** A risk hold is a fraud signal: no retry, no explanation on the call, a specialist takes it. */
+export function settlementNeedsReview(settlement: Settlement): boolean {
+  return settlement.status === "on_hold" || settlement.failure?.code === "RISK_HOLD";
 }
 
-// Couriers can reroute inside a sorting district (the first three pincode digits);
-// anything further away means cancelling and re-shipping, which a call shouldn't promise.
-export function evaluateAddressChange(order: Order, address: Address): PolicyDecision {
-  const stageRule = "Not yet out for delivery";
-  const stage: RuleResult = ADDRESS_EDITABLE.includes(order.status)
-    ? { rule: stageRule, passed: true, note: `Order is ${humanStatus(order.status)}`, onFail: "deny" }
-    : {
-        rule: stageRule,
-        passed: false,
-        note:
-          order.status === "out_for_delivery"
-            ? "Package is already with the delivery rider, so the address can't change today"
-            : `Order is already ${humanStatus(order.status)}`,
-        onFail: "deny",
-      };
+export function settlementNeedsNewBank(settlement: Settlement): boolean {
+  return settlement.failure !== undefined && BANK_SIDE_FAILURES.has(settlement.failure.code);
+}
 
-  const validPincode = /^[1-9]\d{5}$/.test(address.pincode);
-  const pincode: RuleResult = validPincode
-    ? { rule: "Valid pincode", passed: true, note: address.pincode, onFail: "deny" }
-    : {
-        rule: "Valid pincode",
-        passed: false,
-        note: `"${address.pincode}" is not a valid 6-digit pincode`,
-        onFail: "deny",
-      };
+export function evaluateSettlementRetry(settlement: Settlement): PolicyDecision {
+  const failed = rule("Settlement failed and has not been paid");
+  const technical = rule("Failure was a technical bank timeout");
+  const retries = rule(`Fewer than ${SETTLEMENT_MAX_RETRIES} retries so far`);
+  const limit = withinLimit(settlement.amount, SETTLEMENT_RETRY_AUTO_LIMIT, "settlement");
 
-  const currentZone = order.address.pincode.slice(0, 3);
-  const sameZone = validPincode && address.pincode.slice(0, 3) === currentZone;
-  const zone: RuleResult = sameZone
-    ? {
-        rule: "Same delivery zone",
-        passed: true,
-        note: `${address.pincode} is in the same ${currentZone} delivery zone`,
-        onFail: "deny",
-      }
-    : {
-        rule: "Same delivery zone",
-        passed: false,
-        note: `${address.pincode} is outside the ${currentZone} delivery zone, which needs a fresh shipment`,
-        onFail: "deny",
-      };
+  const statusCheck =
+    settlement.status === "failed"
+      ? failed.pass(`${formatRupees(settlement.amount)} for ${formatShortDate(settlement.forDate)} failed`)
+      : settlement.status === "settled"
+        ? failed.fail(
+            `Already settled${settlement.settledAt ? ` on ${formatDateTime(settlement.settledAt)}` : ""}` +
+              (settlement.utr ? `, UTR ••${lastDigits(settlement.utr)}` : ""),
+          )
+        : settlement.status === "processing"
+          ? failed.fail("Already being processed by the bank")
+          : failed.fail("Held by the risk team");
 
-  return decide([stage, pincode, zone], [zone.note]);
+  const failure = settlement.failure;
+  const causeCheck = !failure
+    ? technical.fail("No failure reason on record")
+    : failure.code === "BANK_TIMEOUT"
+      ? technical.pass(`BANK_TIMEOUT: ${failure.note}`)
+      : BANK_SIDE_FAILURES.has(failure.code)
+        ? technical.fail(
+            `${failure.code}: the bank account ••${settlement.bankLast4} can't receive money. The bank account can only be ` +
+              "changed in the Paytm for Business app with verification, never on a call",
+          )
+        : technical.fail(`${failure.code}: ${failure.note}; a specialist must review it`);
+
+  return decide(
+    [
+      statusCheck,
+      causeCheck,
+      settlement.retries < SETTLEMENT_MAX_RETRIES
+        ? retries.pass(`${settlement.retries} retr${settlement.retries === 1 ? "y" : "ies"} so far`)
+        : retries.fail(`Already retried ${settlement.retries} times; the bank needs to look at it`),
+      limit,
+    ],
+    [causeCheck.note, limit.note],
+  );
+}
+
+// ---------- Device rental ----------
+
+function periodStart(period: string): Date {
+  return atIst(`${period}-01`, 0);
+}
+
+/** Charges whose billing month began after the device was handed back. */
+export function chargesAfterReturn(device: DeviceRecord, charges: RentalCharge[]): RentalCharge[] {
+  const returnedAt = device.rental.returnedAt;
+  if (!returnedAt) return [];
+  return charges.filter(
+    (charge) => charge.deviceId === device.id && periodStart(charge.period).getTime() > Date.parse(returnedAt),
+  );
+}
+
+export interface RentRefundCheck {
+  decision: PolicyDecision;
+  refundable: RentalCharge[];
+  amount: number;
+}
+
+export function evaluateRentRefund(device: DeviceRecord, charges: RentalCharge[]): RentRefundCheck {
+  const returned = rule("Device returned with pickup proof");
+  const afterReturn = rule("Rent charged for months after the return");
+  const notRefunded = rule("Not already refunded");
+
+  const late = chargesAfterReturn(device, charges);
+  const refundable = late.filter((charge) => charge.status === "charged");
+  const amount = refundable.reduce((sum, charge) => sum + charge.amount, 0);
+  const months = refundable.map((charge) => `${formatMonth(charge.period)} ${formatRupees(charge.amount)}`).join(", ");
+  const { returnedAt, pickupRef } = device.rental;
+  const limit = withinLimit(amount, RENT_REFUND_AUTO_LIMIT, "refund");
+
+  const decision = decide(
+    [
+      device.status === "returned" && returnedAt && pickupRef
+        ? returned.pass(`Picked up ${formatDateTime(returnedAt)}, pickup ref ${pickupRef}`)
+        : device.status === "returned"
+          ? returned.fail("Marked returned but there is no pickup proof")
+          : returned.fail(`${device.model} is still with the merchant, so its rent is due`),
+      late.length > 0
+        ? afterReturn.pass(late.map((charge) => formatMonth(charge.period)).join(" and ") + " were billed after the return")
+        : afterReturn.fail(returnedAt ? `No rent was charged after ${formatShortDate(returnedAt)}` : "No return on record"),
+      late.length > 0 && refundable.length === 0
+        ? notRefunded.fail("Every charge after the return is already refunded")
+        : notRefunded.pass(months || "Nothing refunded yet"),
+      limit,
+    ],
+    [months ? `Refund ${months}` : "", limit.note].filter(Boolean),
+  );
+  return { decision, refundable, amount };
+}
+
+// ---------- Soundbox ----------
+
+export type DeviceAction = "restart" | "firmware_update" | "test_announcement" | "replacement";
+
+/** `unannounced` counts payments the device missed since it last restarted. */
+export function evaluateDeviceAction(device: DeviceRecord, action: DeviceAction, unannounced: number): PolicyDecision {
+  const inService = rule("Device is in service with the merchant");
+  const results: RuleResult[] = [
+    device.status === "returned"
+      ? inService.fail(`Returned${device.rental.returnedAt ? ` on ${formatShortDate(device.rental.returnedAt)}` : ""}`)
+      : inService.pass(`${device.model} on rental since ${formatShortDate(device.rental.startedAt)}`),
+  ];
+  const online = rule("Device is online to receive the command");
+  const onlineCheck =
+    device.status === "online"
+      ? online.pass(`Last heartbeat ${formatTime(device.lastSeen)}`)
+      : online.fail(`Offline since ${formatDateTime(device.lastSeen)}; restart it first`);
+
+  switch (action) {
+    case "restart": {
+      const needed = rule("Offline or not announcing payments");
+      results.push(
+        device.status === "offline"
+          ? needed.pass(`Offline since ${formatDateTime(device.lastSeen)}`)
+          : unannounced > 0
+            ? needed.pass(`${unannounced} payment${unannounced === 1 ? "" : "s"} not announced`)
+            : needed.fail("Online and announcing normally; no restart needed"),
+      );
+      break;
+    }
+    case "firmware_update": {
+      const behind = rule("Firmware is behind the latest release");
+      results.push(
+        onlineCheck,
+        device.health.firmware !== device.health.latestFirmware
+          ? behind.pass(`${device.health.firmware} → ${device.health.latestFirmware}`)
+          : behind.fail(`Already on the latest firmware ${device.health.latestFirmware}`),
+      );
+      break;
+    }
+    case "test_announcement":
+      results.push(onlineCheck);
+      break;
+    case "replacement": {
+      const restartFailed = rule("A remote restart has failed");
+      const last = device.lastRestart;
+      results.push(
+        last && !last.ok
+          ? restartFailed.pass(`Restart at ${formatDateTime(last.at)} did not bring it back`)
+          : last?.ok
+            ? restartFailed.fail(`The restart at ${formatTime(last.at)} fixed it; no replacement needed`)
+            : restartFailed.fail("No remote restart tried yet; restart it first"),
+      );
+      break;
+    }
+  }
+  return decide(results, [results[results.length - 1].note]);
+}
+
+// ---------- Loans ----------
+
+export interface DuplicateDeduction {
+  day: string;
+  amount: number;
+  first: Loan["deductions"][number];
+  repeat: Loan["deductions"][number];
+}
+
+/** A second deduction of the same amount on the same IST day is a double debit, whatever the mode. */
+export function findDuplicateDeductions(loan: Loan): DuplicateDeduction[] {
+  const seen = new Map<string, Loan["deductions"][number]>();
+  const duplicates: DuplicateDeduction[] = [];
+  const ordered = [...loan.deductions].sort((a, b) => a.at.localeCompare(b.at));
+  for (const deduction of ordered) {
+    const key = `${istDateKey(new Date(deduction.at))}:${deduction.amount}`;
+    const first = seen.get(key);
+    if (first) duplicates.push({ day: key.slice(0, 10), amount: deduction.amount, first, repeat: deduction });
+    else seen.set(key, deduction);
+  }
+  return duplicates;
+}
+
+export function lenderResolutionDue(raisedAt: Date): Date {
+  return endOfIstDay(shiftDateKey(istDateKey(raisedAt), LENDER_GRIEVANCE_DAYS));
+}
+
+// Paytm is the lending service provider, not the lender: the money sits on the lender's books, so only the
+// lender can refund it. Closr's job is to put the case in front of the lender's grievance officer with proof.
+export function evaluateLenderGrievance(loan: Loan, duplicates: DuplicateDeduction[], now: Date = new Date()): PolicyDecision {
+  const due = lenderResolutionDue(now);
+  const proof = duplicates[0];
+  return decide(
+    [
+      rule("Loan is on a regulated lender's books").pass(`${loan.lender} is the lender; Paytm is the lending service provider`),
+      rule("Refunds of lender money are the lender's decision").pass(
+        "Paytm cannot reverse a loan deduction; the case goes to the lender's grievance officer",
+      ),
+      rule("Deduction record checked").pass(
+        proof
+          ? `${formatRupees(proof.amount)} taken twice on ${formatShortDate(proof.day)} ` +
+              `(RRN ••${lastDigits(proof.first.rrn)} and ••${lastDigits(proof.repeat.rrn)})`
+          : "No duplicate in the deduction record; the customer's account of the issue is forwarded as stated",
+      ),
+      rule(`Lender must resolve within ${LENDER_GRIEVANCE_DAYS} days`).pass(
+        `Reply due by ${formatLongDate(due)}; after that the customer can approach the RBI Ombudsman`,
+      ),
+    ],
+    [`Route to ${loan.grievanceOfficer.name}, reply due by ${formatShortDate(due)}`],
+  );
 }

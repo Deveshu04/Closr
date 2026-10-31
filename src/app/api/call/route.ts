@@ -1,11 +1,22 @@
 import { NextResponse } from "next/server";
 import { placeCall } from "@/lib/bolna";
 import { claimDemoCustomer, createCall, getActiveCall, getState, recordMoment, updateCall } from "@/lib/db";
+import type { Customer, ProfileKind } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+function greetingFor(customer: Customer | undefined): string {
+  const name = customer ? `${customer.name.split(" ")[0]} जी` : "";
+  if (customer?.kind === "merchant") {
+    const store = customer.business?.name ?? "आपकी दुकान";
+    return `नमस्ते ${name}, मैं पेटीएम for Business support से क्लोज़र बोल रही हूँ। आपने ${store} के लिए call back माँगा था, बताइए क्या दिक्कत आ रही है?`;
+  }
+  return `नमस्ते ${name}, मैं पेटीएम customer care से क्लोज़र बोल रही हूँ। आपने अभी call back माँगा था, बताइए मैं आपकी क्या मदद कर सकती हूँ?`;
+}
+
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => ({}))) as { phone?: string };
+  const body = (await req.json().catch(() => ({}))) as { phone?: string; profile?: string };
+  const profile: ProfileKind = body.profile === "merchant" ? "merchant" : "consumer";
   const phone = `+91${(body.phone ?? "").replace(/\D/g, "").slice(-10)}`;
   if (!/^\+91[6-9]\d{9}$/.test(phone)) {
     return NextResponse.json({ ok: false, error: "Enter a 10-digit Indian mobile number" }, { status: 400 });
@@ -16,7 +27,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "A call is already in progress" }, { status: 409 });
   }
 
-  claimDemoCustomer(phone);
+  claimDemoCustomer(phone, profile);
   const call = createCall(phone);
   const customer = getState().customers.find((c) => c.id === call.customerId);
 
@@ -25,6 +36,9 @@ export async function POST(req: Request) {
       call_ref: call.callRef,
       customer_name: customer?.name ?? "",
       customer_phone: call.phone,
+      customer_type: customer?.kind ?? profile,
+      business_name: customer?.business?.name ?? "",
+      greeting: greetingFor(customer),
     });
     updateCall(call.callRef, { bolnaExecutionId: executionId, status: "ringing" });
     recordMoment({

@@ -8,10 +8,15 @@ export const EMPTY_STATE: ConsoleState = {
   moments: [],
   approvals: [],
   customers: [],
-  orders: [],
-  refunds: [],
+  transactions: [],
+  disputes: [],
+  settlements: [],
+  devices: [],
+  rentalCharges: [],
+  rewards: [],
+  loans: [],
+  payouts: [],
   tickets: [],
-  invoices: [],
 };
 
 const REQUEST_TIMEOUT_MS = 4000;
@@ -30,10 +35,15 @@ function normalize(raw: unknown): ConsoleState | null {
     moments: list(r.moments),
     approvals: list(r.approvals),
     customers: list(r.customers),
-    orders: list(r.orders),
-    refunds: list(r.refunds),
+    transactions: list(r.transactions),
+    disputes: list(r.disputes),
+    settlements: list(r.settlements),
+    devices: list(r.devices),
+    rentalCharges: list(r.rentalCharges),
+    rewards: list(r.rewards),
+    loans: list(r.loans),
+    payouts: list(r.payouts),
     tickets: list(r.tickets),
-    invoices: list(r.invoices),
   };
 }
 

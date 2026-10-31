@@ -1,5 +1,5 @@
 import type { Moment } from "@/lib/types";
-import { humanize } from "../lib/format";
+import { humanize, inr } from "../lib/format";
 import { pickNumber, pickString } from "../lib/data";
 import { StatusNote } from "./shared";
 
@@ -35,8 +35,8 @@ function readings(moment: Moment): Reading[] {
   if (language) out.push({ label: "Language", value: humanize(language), tone: "neutral" });
   const urgency = pickString(d, "urgency", "priority");
   if (urgency) out.push({ label: "Urgency", value: humanize(urgency), tone: "neutral" });
-  const orderId = pickString(d, "orderId", "order_id", "order");
-  if (orderId) out.push({ label: "Order", value: orderId, tone: "neutral" });
+  const amount = pickNumber(d, "amount");
+  if (amount !== undefined) out.push({ label: "Amount", value: inr(amount), tone: "neutral" });
   const confidence = pickNumber(d, "confidence");
   if (confidence !== undefined) {
     const pct = confidence <= 1 ? Math.round(confidence * 100) : Math.round(confidence);

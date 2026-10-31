@@ -1,5 +1,4 @@
-import { istDateKey, shiftDateKey } from "@/lib/format";
-import { DELIVERY_SLOTS } from "@/lib/policy";
+import { atIst, istDateKey, shiftDateKey } from "@/lib/format";
 
 export type ToolParams = Record<string, unknown>;
 
@@ -47,6 +46,34 @@ export function readText(params: ToolParams, key: string): string | undefined {
   return trimmed && !UNFILLED.test(trimmed) ? trimmed : undefined;
 }
 
+const AMOUNT_UNITS: Record<string, number> = {
+  k: 1_000,
+  thousand: 1_000,
+  hazaar: 1_000,
+  hazar: 1_000,
+  hajar: 1_000,
+  sau: 100,
+  hundred: 100,
+  lakh: 100_000,
+  lac: 100_000,
+};
+
+/** "2000", "₹2,000", "Rs 1,500.50", "2k", "15 sau", "1.5 lakh". */
+export function parseAmount(text: string): number | undefined {
+  const match = text
+    .toLowerCase()
+    .replace(/,/g, "")
+    .match(/(\d+(?:\.\d+)?)\s*(k|thousand|hazaa?r|hajar|sau|hundred|lakh|lac)?\b/);
+  if (!match) return undefined;
+  const value = Number(match[1]) * (match[2] ? (AMOUNT_UNITS[match[2]] ?? 1) : 1);
+  return Number.isFinite(value) && value > 0 ? Math.round(value * 100) / 100 : undefined;
+}
+
+export function readAmount(params: ToolParams, key: string): number | undefined {
+  const raw = readText(params, key);
+  return raw ? parseAmount(raw) : undefined;
+}
+
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 const WEEKDAYS: Record<string, number> = {
@@ -59,11 +86,12 @@ const WEEKDAYS: Record<string, number> = {
   saturday: 6, sat: 6, shanivar: 6, shaniwar: 6,
 };
 
-// "kal" means both yesterday and tomorrow in Hindi; for a delivery date it can only be tomorrow.
-const RELATIVE_DAYS: [RegExp, number][] = [
-  [/\b(?:day after tomorrow|parso|parson|parsoon)\b/, 2],
-  [/\b(?:tomorrow|tmrw|tomorow|kal)\b/, 1],
-  [/\b(?:today|aaj)\b/, 0],
+// "kal" and "parso" point both ways in Hindi; a payment or settlement being asked about is in the past.
+const RELATIVE_PAST_DAYS: [RegExp, number][] = [
+  [/\b(?:day before yesterday|parso|parson|parsoon)\b/, 2],
+  [/\b(?:yesterday|kal|kall)\b/, 1],
+  [/\b(?:today|aaj|aj|abhi)\b/, 0],
+  [/\b(?:last week|pichhle hafte|pichle hafte)\b/, 7],
 ];
 
 function dateKeyFrom(year: number, month: number, day: number): string | null {
@@ -72,8 +100,8 @@ function dateKeyFrom(year: number, month: number, day: number): string | null {
   return valid ? date.toISOString().slice(0, 10) : null;
 }
 
-/** A day and month with no year means the next time that date comes round. */
-function upcoming(day: number, month: number, year: string | undefined, today: string): string | null {
+/** A day and month with no year means the last time that date came round. */
+function mostRecent(day: number, month: number, year: string | undefined, today: string): string | null {
   if (year) {
     const fullYear = year.length === 2 ? 2000 + Number(year) : Number(year);
     return dateKeyFrom(fullYear, month, day);
@@ -81,93 +109,102 @@ function upcoming(day: number, month: number, year: string | undefined, today: s
   const thisYear = Number(today.slice(0, 4));
   const candidate = dateKeyFrom(thisYear, month, day);
   if (!candidate) return null;
-  return candidate < today ? dateKeyFrom(thisYear + 1, month, day) : candidate;
+  return candidate > today ? dateKeyFrom(thisYear - 1, month, day) : candidate;
 }
 
 function monthIndex(word: string): number {
   return MONTHS.indexOf(word.slice(0, 3)) + 1;
 }
 
-/** Understands ISO dates, Indian day-first dates, "2 Nov", "kal", "parso", "in 3 days" and weekday names. */
-export function parseDeliveryDate(input: string, today: string = istDateKey()): string | null {
+/** Understands ISO dates, Indian day-first dates, "30 Oct", "kal", "parso", "3 din pehle" and weekday names. */
+export function parsePastDate(input: string, today: string = istDateKey()): string | null {
   const text = input.trim().toLowerCase();
 
   const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (iso) return dateKeyFrom(Number(iso[1]), Number(iso[2]), Number(iso[3]));
 
   const dayFirst = text.match(/^(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2}|\d{4}))?$/);
-  if (dayFirst) return upcoming(Number(dayFirst[1]), Number(dayFirst[2]), dayFirst[3], today);
+  if (dayFirst) return mostRecent(Number(dayFirst[1]), Number(dayFirst[2]), dayFirst[3], today);
 
-  const inDays = text.match(/\b(\d{1,2})\s*(?:days?|din)\b/);
-  if (inDays) return shiftDateKey(today, Number(inDays[1]));
+  const daysAgo = text.match(/\b(\d{1,2})\s*(?:days?|din)\b/);
+  if (daysAgo) return shiftDateKey(today, -Number(daysAgo[1]));
 
-  for (const [pattern, offset] of RELATIVE_DAYS) {
-    if (pattern.test(text)) return shiftDateKey(today, offset);
+  for (const [pattern, offset] of RELATIVE_PAST_DAYS) {
+    if (pattern.test(text)) return shiftDateKey(today, -offset);
   }
 
   const dayMonth = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]{3,})\.?(?:,?\s+(\d{4}))?/);
   if (dayMonth && monthIndex(dayMonth[2]) > 0) {
-    return upcoming(Number(dayMonth[1]), monthIndex(dayMonth[2]), dayMonth[3], today);
+    return mostRecent(Number(dayMonth[1]), monthIndex(dayMonth[2]), dayMonth[3], today);
   }
   const monthDay = text.match(/\b([a-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4}))?/);
   if (monthDay && monthIndex(monthDay[1]) > 0) {
-    return upcoming(Number(monthDay[2]), monthIndex(monthDay[1]), monthDay[3], today);
+    return mostRecent(Number(monthDay[2]), monthIndex(monthDay[1]), monthDay[3], today);
   }
 
   const weekday = text.split(/[^a-z]+/).find((word) => word in WEEKDAYS);
   if (weekday) {
     const todayIndex = new Date(`${today}T00:00:00Z`).getUTCDay();
-    const ahead = (WEEKDAYS[weekday] - todayIndex + 7) % 7 || 7;
-    return shiftDateKey(today, ahead);
+    return shiftDateKey(today, -((todayIndex - WEEKDAYS[weekday] + 7) % 7));
   }
-
-  const parsed = Date.parse(input);
-  return Number.isFinite(parsed) ? istDateKey(new Date(parsed)) : null;
+  return null;
 }
 
-const SLOT_KEYWORDS: [RegExp, number][] = [
-  [/\b(?:morning|subah|savere|subha)\b/, 0],
-  [/\b(?:afternoon|dopahar|dopehar|lunch)\b/, 1],
-  [/\b(?:evening|shaam|sham)\b/, 2],
-  [/\b(?:night|raat|late)\b/, 3],
+const HINDI_HOURS: Record<string, number> = {
+  ek: 1, do: 2, teen: 3, char: 4, chaar: 4, paanch: 5, panch: 5, chhe: 6, che: 6, chhah: 6,
+  saat: 7, aath: 8, nau: 9, das: 10, dus: 10, gyarah: 11, gyara: 11, barah: 12, bara: 12,
+};
+
+const PART_OF_DAY: [RegExp, number, "am" | "pm"][] = [
+  [/\b(?:morning|subah|subha|savere)\b/, 9, "am"],
+  [/\b(?:afternoon|dopahar|dopehar)\b/, 13, "pm"],
+  [/\b(?:evening|shaam|sham)\b/, 18, "pm"],
+  [/\b(?:night|raat)\b/, 20, "pm"],
 ];
 
-function squash(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]/g, "");
+function clockFrom(text: string): { hour: number; minute: number } | null {
+  const part = PART_OF_DAY.find(([pattern]) => pattern.test(text));
+  const digits =
+    text.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm|a\.m\.|p\.m\.|baje|bje|o'?clock|hrs?)/) ??
+    text.match(/\b(\d{1,2})[:.](\d{2})\b/);
+  const unit = digits?.[3] ?? "";
+  const meridiem = unit.startsWith("a") ? "am" : unit.startsWith("p") ? "pm" : part?.[2];
+
+  let hour: number | undefined;
+  let minute = 0;
+  if (digits) {
+    hour = Number(digits[1]);
+    minute = digits[2] ? Number(digits[2]) : 0;
+  } else {
+    const spoken = text.match(/\b(dedh|dhai|dhaai|saadhe\s+[a-z]+|[a-z]+)\s+baje\b/);
+    if (spoken) {
+      const word = spoken[1];
+      if (word === "dedh") [hour, minute] = [1, 30];
+      else if (word === "dhai" || word === "dhaai") [hour, minute] = [2, 30];
+      else if (word.startsWith("saadhe")) [hour, minute] = [HINDI_HOURS[word.split(/\s+/)[1]] ?? Number.NaN, 30];
+      else hour = HINDI_HOURS[word];
+    }
+  }
+  if (hour === undefined || !Number.isFinite(hour)) {
+    return part ? { hour: part[1], minute: 0 } : null;
+  }
+  if (hour > 23 || minute > 59) return null;
+  if (hour <= 12) {
+    // A shop's day runs 8 am to 10 pm, so "2 baje" without am/pm means the afternoon.
+    const pm = meridiem === "pm" || (meridiem === undefined && hour < 8);
+    hour = pm ? (hour % 12) + 12 : hour % 12 === 0 && meridiem === "am" ? 0 : hour;
+  }
+  return { hour, minute };
 }
 
-function to24Hour(hour: number, meridiem: string | undefined): number {
-  const base = hour % 12;
-  if (meridiem === "pm") return base + 12;
-  if (meridiem === "am") return base;
-  // Without am/pm, a delivery hour below 9 can only mean afternoon or evening.
-  return base < 9 ? base + 12 : base;
-}
+/** "2 baje se", "since 2:30 pm", "kal shaam", "subah se", "yesterday": the moment that window opens. */
+export function parseSince(input: string, now: Date = new Date()): Date | null {
+  const text = input.trim().toLowerCase();
+  const today = istDateKey(now);
+  const day = parsePastDate(text, today);
+  const clock = clockFrom(text);
+  if (!clock) return day ? atIst(day, 0) : null;
 
-/** Maps "morning", "shaam ko", "3 to 6 pm" or an exact label onto the courier slot that fits best. */
-export function parseSlot(input: string): string | null {
-  const exact = DELIVERY_SLOTS.find((slot) => squash(slot.label) === squash(input));
-  if (exact) return exact.label;
-
-  const text = input.toLowerCase();
-  const keyword = SLOT_KEYWORDS.find(([pattern]) => pattern.test(text));
-  if (keyword) return DELIVERY_SLOTS[keyword[1]].label;
-
-  const times = [...text.matchAll(/(\d{1,2})(?::\d{2})?\s*(am|pm)?/g)].slice(0, 2);
-  if (times.length === 0) return null;
-  const start = to24Hour(Number(times[0][1]), times[0][2] ?? times.at(-1)?.[2]);
-  if (times.length === 1) return DELIVERY_SLOTS.find((slot) => start < slot.endHour)?.label ?? null;
-
-  let end = to24Hour(Number(times[1][1]), times[1][2]);
-  if (end <= start) end += 12;
-  const overlap = (slot: (typeof DELIVERY_SLOTS)[number]) =>
-    Math.min(end, slot.endHour) - Math.max(start, slot.startHour);
-  const best = [...DELIVERY_SLOTS].sort((a, b) => overlap(b) - overlap(a))[0];
-  return overlap(best) > 0 ? best.label : null;
-}
-
-/** Digits only, so "110 020" and 110020 both work; validity is the address policy's call. */
-export function readPincode(params: ToolParams, key: string): string | undefined {
-  const raw = readText(params, key);
-  return raw ? raw.replace(/\D/g, "") : undefined;
+  const at = atIst(day ?? today, clock.hour, clock.minute);
+  return !day && at > now ? atIst(shiftDateKey(today, -1), clock.hour, clock.minute) : at;
 }

@@ -1,3 +1,5 @@
+const IST = "Asia/Kolkata";
+
 const inrWhole = new Intl.NumberFormat("en-IN", {
   style: "currency",
   currency: "INR",
@@ -24,31 +26,41 @@ function toDate(iso: string | undefined): Date | null {
 export function clockTime(iso: string | undefined): string {
   const d = toDate(iso);
   if (!d) return "—";
-  return d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  return d.toLocaleTimeString("en-IN", { timeZone: IST, hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
+/** "2:14 pm" */
+export function timeOfDay(iso: string | undefined): string {
+  const d = toDate(iso);
+  if (!d) return "—";
+  return d.toLocaleTimeString("en-IN", { timeZone: IST, hour: "numeric", minute: "2-digit" });
 }
 
 export function shortDateTime(iso: string | undefined): string {
   const d = toDate(iso);
   if (!d) return "—";
-  return d.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  return d.toLocaleString("en-IN", { timeZone: IST, day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 }
 
 export function shortDate(iso: string | undefined): string {
   const d = toDate(iso);
   if (!d) return "—";
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return d.toLocaleDateString("en-IN", { timeZone: IST, day: "numeric", month: "short" });
 }
 
 /** "Wed, 4 Nov" */
 export function weekdayDate(iso: string | undefined): string {
   const d = toDate(iso);
   if (!d) return "—";
-  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+  return d.toLocaleDateString("en-IN", { timeZone: IST, weekday: "short", day: "numeric", month: "short" });
 }
 
-export function msSince(iso: string | undefined, now: number): number {
-  const d = toDate(iso);
-  return d ? Math.max(0, now - d.getTime()) : 0;
+/** "2026-09" → "Sep 2026" */
+export function billingMonth(period: string): string {
+  const d = new Date(`${period}-15T12:00:00Z`);
+  return Number.isNaN(d.getTime())
+    ? period
+    : d.toLocaleDateString("en-IN", { timeZone: IST, month: "short", year: "numeric" });
 }
 
 export function duration(ms: number): string {
@@ -59,9 +71,16 @@ export function duration(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
-const ACRONYMS = /\b(vip|upi|cod|utr|gst|gstin|awb|qc|id|crm|eta|rto|emi|kyc|ltv|otp)\b/g;
+/** Long references (RRN, UTR, MID) are shown by their last four; the full value goes in a title. */
+export function lastFour(value: string | undefined): string {
+  const tail = value?.replace(/\s/g, "").slice(-4);
+  return tail ? `••${tail}` : "—";
+}
 
-/** "refund_status" / "qcStatus" / "vip" → "Refund status" / "QC status" / "VIP" */
+const ACRONYMS =
+  /\b(vip|upi|utr|rrn|gst|gstin|id|crm|eta|emi|kyc|otp|mid|udir|npci|rbi|sim|ifsc|vpa|p2p|p2m|tat|sms)\b/g;
+
+/** "refund_status" / "kycStatus" / "upi" → "Refund status" / "KYC status" / "UPI" */
 export function humanize(token: string): string {
   const spaced = token
     .replace(/[_-]+/g, " ")

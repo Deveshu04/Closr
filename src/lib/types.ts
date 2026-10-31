@@ -1,4 +1,15 @@
-export type SystemName = "crm" | "orders" | "courier" | "payments" | "helpdesk" | "policy" | "web";
+export type SystemName =
+  | "crm"
+  | "upi"
+  | "settlements"
+  | "devices"
+  | "billing"
+  | "rewards"
+  | "lending"
+  | "payouts"
+  | "helpdesk"
+  | "policy"
+  | "web";
 
 export type MomentKind =
   | "call"
@@ -28,114 +39,167 @@ export interface Moment {
   at: string;
 }
 
+export type ProfileKind = "consumer" | "merchant";
+
+export interface BankAccount {
+  bank: string;
+  last4: string;
+  ifsc: string;
+  status: "active" | "closed" | "frozen";
+}
+
 export interface Customer {
   id: string;
+  kind: ProfileKind;
   name: string;
   phone: string;
   email: string;
   city: string;
   language: "hinglish" | "hindi" | "english";
-  tier: "new" | "regular" | "vip";
+  /** On Paytm since. */
+  since: string;
+  kyc: "full" | "minimum";
+  upiHandle: string;
+  /** Consumer: the UPI-linked account. Merchant: the settlement account. */
+  bank: BankAccount;
   flags: string[];
-  lifetimeValue: number;
+  business?: { name: string; mid: string; category: string; address: string };
 }
 
-export interface LineItem {
-  sku: string;
-  name: string;
-  qty: number;
-  price: number;
-}
+export type TxnStatus = "success" | "failed" | "pending" | "debited_not_credited" | "reversed";
 
-export type OrderStatus =
-  | "placed"
-  | "shipped"
-  | "out_for_delivery"
-  | "delivered"
-  | "return_requested"
-  | "return_picked"
-  | "refunded"
-  | "cancelled";
-
-export interface ShipmentEvent {
+export interface UpiTransaction {
+  id: string;
+  customerId: string;
+  direction: "debit" | "credit";
+  kind: "p2p" | "p2m";
+  amount: number;
+  counterparty: { name: string; vpa: string };
+  status: TxnStatus;
+  /** 12-digit UPI reference number (RRN/UTR). */
+  rrn: string;
   at: string;
-  status: string;
-  location: string;
+  /** RBI turn-around time for a debit that never reached the beneficiary. */
+  reversal?: { deadline: string; reversedAt?: string; rrn?: string };
+  disputeId?: string;
+  /** Merchant collections: the Soundbox that should have announced it, and whether it did. */
+  deviceId?: string;
+  announced?: boolean;
 }
 
-export interface Shipment {
-  courier: string;
-  awb: string;
-  status: string;
-  eta?: string;
-  slot?: string;
-  events: ShipmentEvent[];
-}
-
-export interface ReturnInfo {
+export interface Dispute {
+  id: string;
+  customerId: string;
+  txnId: string;
+  channel: "UDIR";
   reason: string;
-  requestedAt: string;
-  pickedAt?: string;
-  qcStatus: "awaiting_pickup" | "pending" | "passed" | "failed";
-  qcSince?: string;
+  status: "raised" | "in_review" | "resolved";
+  raisedAt: string;
+  expectedBy: string;
 }
 
-export interface Address {
-  line1: string;
-  line2?: string;
-  city: string;
-  pincode: string;
-}
-
-export interface Order {
+export interface Settlement {
   id: string;
   customerId: string;
-  items: LineItem[];
-  total: number;
-  status: OrderStatus;
-  placedAt: string;
-  deliveredAt?: string;
-  address: Address;
-  payment: { method: "UPI" | "Card" | "COD" | "NetBanking"; ref: string };
-  shipment: Shipment;
-  return?: ReturnInfo;
-  invoiceId?: string;
+  /** The business day whose collections this settles. */
+  forDate: string;
+  amount: number;
+  txnCount: number;
+  status: "settled" | "failed" | "on_hold" | "processing";
+  bankLast4: string;
+  utr?: string;
+  settledAt?: string;
+  failure?: { code: "BANK_TIMEOUT" | "ACCOUNT_CLOSED" | "ACCOUNT_FROZEN" | "RISK_HOLD"; note: string };
+  retries: number;
 }
 
-export interface Invoice {
+export interface Device {
+  /** Serial number. */
   id: string;
-  number: string;
-  orderId: string;
   customerId: string;
-  issuedAt: string;
-  subtotal: number;
-  gst: number;
-  total: number;
-  gstin: string;
-  /** Set when a copy was sent to the customer; channels like "email", "whatsapp". */
-  sentAt?: string;
-  sentTo?: string[];
+  model: string;
+  status: "online" | "offline" | "returned";
+  lastSeen: string;
+  health: {
+    signal: "good" | "weak" | "none";
+    battery: number;
+    firmware: string;
+    latestFirmware: string;
+    sim: string;
+    volume: number;
+  };
+  rental: {
+    monthly: number;
+    deposit: number;
+    startedAt: string;
+    returnedAt?: string;
+    pickupRef?: string;
+    billingActive: boolean;
+  };
 }
 
-export interface Refund {
+export interface RentalCharge {
   id: string;
-  orderId: string;
+  customerId: string;
+  deviceId: string;
+  /** Billing month, e.g. "2026-09". */
+  period: string;
+  amount: number;
+  chargedAt: string;
+  status: "charged" | "refunded";
+  payoutId?: string;
+}
+
+export interface Reward {
+  id: string;
+  customerId: string;
+  txnId: string;
+  offer: string;
+  amount: number;
+  status: "credited" | "pending" | "failed" | "expired";
+  promisedBy: string;
+  creditedAt?: string;
+  payoutId?: string;
+  failureNote?: string;
+}
+
+export interface Loan {
+  id: string;
+  customerId: string;
+  lender: string;
+  product: "personal" | "merchant";
+  principal: number;
+  outstanding: number;
+  repayment: { mode: "emi" | "daily"; amount: number; dueDay?: number };
+  deductions: { id: string; at: string; amount: number; rrn: string }[];
+  grievanceOfficer: { name: string; email: string };
+}
+
+/** Money Closr moves on Paytm's side. One record per subject, so a double turn on the call can never pay twice. */
+export interface Payout {
+  id: string;
+  customerId: string;
+  kind: "cashback" | "rent_refund" | "settlement_retry";
+  /** The reward, device or settlement this payout is for. */
+  subjectId: string;
   amount: number;
   status: "processed" | "pending_approval" | "rejected";
-  method: string;
   idempotencyKey: string;
   createdAt: string;
-  utr?: string;
+  rrn?: string;
   expectedBy?: string;
 }
 
 export interface Ticket {
   id: string;
   customerId: string;
-  orderId?: string;
+  category: "upi" | "settlement" | "device" | "billing" | "rewards" | "loan" | "other";
+  relatedId?: string;
   subject: string;
   status: "open" | "resolved" | "escalated";
   priority: "low" | "normal" | "high";
+  /** Set when the case is routed outside Paytm, e.g. to a lender's grievance officer. */
+  routedTo?: string;
   notes: string[];
   createdAt: string;
   updatedAt: string;
@@ -144,7 +208,9 @@ export interface Ticket {
 export interface Approval {
   id: string;
   callRef: string;
-  orderId: string;
+  customerId: string;
+  kind: Payout["kind"];
+  subjectId: string;
   amount: number;
   reason: string;
   /** Short brief a human can decide on in one glance. */
@@ -180,8 +246,13 @@ export interface ConsoleState {
   moments: Moment[];
   approvals: Approval[];
   customers: Customer[];
-  orders: Order[];
-  refunds: Refund[];
+  transactions: UpiTransaction[];
+  disputes: Dispute[];
+  settlements: Settlement[];
+  devices: Device[];
+  rentalCharges: RentalCharge[];
+  rewards: Reward[];
+  loans: Loan[];
+  payouts: Payout[];
   tickets: Ticket[];
-  invoices: Invoice[];
 }

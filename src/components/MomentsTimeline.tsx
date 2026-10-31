@@ -2,7 +2,8 @@
 
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import { type CSSProperties, useEffect, useRef } from "react";
-import type { CallRecord, Moment, MomentKind } from "@/lib/types";
+import type { CallRecord, Customer, Moment, MomentKind } from "@/lib/types";
+import { TranscriptButton } from "./backoffice/CallHistory";
 import type { ApprovalControls } from "./hooks/useApprovals";
 import { MomentRow, SPINE_LEFT } from "./moments/MomentRow";
 import { KIND_META } from "./moments/shared";
@@ -14,6 +15,8 @@ const ACTIVE = new Set<CallRecord["status"]>(["dialing", "ringing", "in_progress
 interface Props {
   moments: Moment[];
   call: CallRecord | null;
+  /** The customer on the call shown, once Closr has identified them. */
+  customer: Customer | undefined;
   controls: ApprovalControls;
   className?: string;
 }
@@ -25,11 +28,12 @@ function offsetBase(moments: Moment[], call: CallRecord | null): number {
   return Number.isFinite(first) ? first : 0;
 }
 
-export function MomentsTimeline({ moments, call, controls, className = "" }: Props) {
+export function MomentsTimeline({ moments, call, customer, controls, className = "" }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const reduceMotion = useReducedMotion();
   const live = call ? ACTIVE.has(call.status) : false;
+  const ended = call?.status === "completed" || call?.status === "failed";
   const base = offsetBase(moments, call);
   const last = moments.at(-1);
   const lastKey = last ? `${moments.length}:${last.id}:${last.status}` : "";
@@ -45,18 +49,37 @@ export function MomentsTimeline({ moments, call, controls, className = "" }: Pro
 
   return (
     <section aria-labelledby="timeline-heading" className={`flex flex-col bg-paper lg:min-h-0 ${className}`}>
-      <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 pb-3 pt-5 lg:px-8">
-        <h2 id="timeline-heading" className="font-serif text-[1.625rem] font-semibold leading-tight text-navy">
-          On this call
-        </h2>
-        {steps > 0 && (
-          <p className="figures text-[15px] text-muted">
-            {steps} {steps === 1 ? "step" : "steps"}
-            {actions > 0 && (
-              <>
-                , <span className="font-semibold text-navy">{actions} done in the back office</span>
-              </>
-            )}
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1 px-5 pb-3 pt-5 lg:px-8">
+        <div className="min-w-0">
+          <h2 id="timeline-heading" className="font-serif text-[1.625rem] font-semibold leading-tight text-navy">
+            {live || moments.length === 0 ? "On this call" : "Last call"}
+          </h2>
+          {customer && moments.length > 0 && (
+            <p className="mt-0.5 truncate text-[14px] text-muted">
+              {customer.kind === "merchant" ? (customer.business?.name ?? customer.name) : customer.name}
+              <span className="text-faint"> · {customer.kind === "merchant" ? "Merchant" : "Consumer"}</span>
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+          {steps > 0 && (
+            <p className="figures text-[14px] text-muted">
+              {steps} {steps === 1 ? "step" : "steps"}
+              {actions > 0 && (
+                <>
+                  {" · "}
+                  <span className="font-semibold text-navy">
+                    {actions} {actions === 1 ? "action" : "actions"} in the back office
+                  </span>
+                </>
+              )}
+            </p>
+          )}
+          {ended && call && <TranscriptButton variant="button" call={{ callRef: call.callRef, hasTranscript: Boolean(call.transcript) }} />}
+        </div>
+        {ended && call?.summary && (
+          <p className="w-full max-w-[64ch] border-l-2 border-sky/60 pl-3 font-serif text-[15.5px] italic leading-relaxed text-ink/85">
+            {call.summary}
           </p>
         )}
       </header>
@@ -73,7 +96,7 @@ export function MomentsTimeline({ moments, call, controls, className = "" }: Pro
           <ol
             aria-live="polite"
             aria-relevant="additions"
-            className="relative pt-2 before:absolute before:bottom-6 before:left-(--spine) before:top-4 before:w-px before:bg-rule before:content-['']"
+            className="relative pt-2 [overflow-wrap:anywhere] before:absolute before:bottom-6 before:left-(--spine) before:top-4 before:w-px before:bg-rule before:content-['']"
             style={{ "--spine": SPINE_LEFT } as CSSProperties}
           >
             <AnimatePresence initial={false}>
@@ -105,8 +128,8 @@ function EmptyTimeline({ waiting }: { waiting: boolean }) {
           : "Every step Closr takes on the call lands here, the moment it takes it."}
       </p>
       <p className="mt-3 max-w-[56ch] text-base leading-relaxed text-muted">
-        It listens, pulls the records, checks policy, acts, then re-reads the system to confirm. Anything over its limit
-        comes to you as a one-tap approval.
+        It listens, pulls the records, checks policy, acts, then re-reads the system to confirm. Rules a customer cites
+        are checked against RBI and NPCI sources, and anything over its limit comes to a person as a one-tap approval.
       </p>
 
       <ul aria-label="Kinds of steps" className="relative mt-8 space-y-4 before:absolute before:bottom-4 before:left-4 before:top-4 before:w-px before:bg-rule before:content-['']">

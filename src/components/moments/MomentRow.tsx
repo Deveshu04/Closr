@@ -25,8 +25,15 @@ const OK_NODE: Partial<Record<MomentKind, string>> = {
   understood: "border-sky/50 bg-sky-wash text-navy",
 };
 
-function nodeClass(kind: MomentKind, status: MomentStatus): string {
+const VERDICT_NODE: Record<string, string> = {
+  supported: "border-leaf bg-leaf text-white",
+  not_found: "border-amber-bright bg-amber-wash text-amber",
+  contradicted: "border-brick bg-brick text-white",
+};
+
+function nodeClass(kind: MomentKind, status: MomentStatus, verdict: unknown): string {
   if (status === "running") return "node-spin border-sky/40 bg-sheet text-sky";
+  if (kind === "search" && typeof verdict === "string" && Object.hasOwn(VERDICT_NODE, verdict)) return VERDICT_NODE[verdict];
   if (status === "waiting") return "is-waiting border-amber-bright bg-amber-bright text-white";
   if (isTrouble(status)) return "border-brick/50 bg-brick-wash text-brick";
   return OK_NODE[kind] ?? "border-navy/25 bg-sheet text-navy";
@@ -45,7 +52,7 @@ function Node({ moment, latest }: { moment: Moment; latest: boolean }) {
   return (
     <span
       title={KIND_META[moment.kind].label}
-      className={`relative z-10 grid size-8 place-items-center rounded-full border-[1.5px] ${nodeClass(moment.kind, moment.status)} ${
+      className={`relative z-10 grid size-8 place-items-center rounded-full border-[1.5px] ${nodeClass(moment.kind, moment.status, moment.data?.verdict)} ${
         latest ? "outline-4 outline-sky/25" : ""
       }`}
     >

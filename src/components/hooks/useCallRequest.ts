@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useEffect, useState } from "react";
-import type { CallRecord } from "@/lib/types";
+import type { CallRecord, ProfileKind } from "@/lib/types";
 import { startCall } from "../lib/api";
 import { normalizeIndianMobile } from "../lib/phone";
 import { useNow } from "./useNow";
@@ -35,7 +35,7 @@ export interface CallRequest {
 }
 
 /** Phone entry, the call-back request and live call timing, shared by the care console and the customer app. */
-export function useCallRequest(call: CallRecord | null, refresh: () => void): CallRequest {
+export function useCallRequest(call: CallRecord | null, refresh: () => void, profile: ProfileKind): CallRequest {
   const [phoneInput, setInput] = useState("");
   const [blurred, setBlurred] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -89,7 +89,7 @@ export function useCallRequest(call: CallRecord | null, refresh: () => void): Ca
     } catch {
       // Remembering the number is a convenience only.
     }
-    const result = await startCall(phone);
+    const result = await startCall(phone, profile);
     setStarting(false);
     if (result.ok) setPending({ callRef: result.callRef, at: Date.now() });
     else setError(result.error);

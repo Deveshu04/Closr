@@ -1,8 +1,9 @@
 "use client";
 
-import { Check, LoaderCircle } from "lucide-react";
+import { Check, LoaderCircle, ShieldCheck } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef } from "react";
+import type { ProfileKind } from "@/lib/types";
 import { ClosrMark } from "../brand/ClosrMark";
 import type { CallPhase } from "../hooks/useCallRequest";
 import { duration } from "../lib/format";
@@ -18,6 +19,7 @@ export const BUBBLE: Record<Tone, string> = {
 };
 
 interface Props {
+  app: ProfileKind;
   phase: CallPhase;
   elapsed: number | null;
   /** The number being called, as +91XXXXXXXXXX, when known. */
@@ -25,7 +27,7 @@ interface Props {
   steps: Step[];
 }
 
-export function LiveCall({ phase, elapsed, phone, steps }: Props) {
+export function LiveCall({ app, phase, elapsed, phone, steps }: Props) {
   const connected = phase === "in_progress";
   const reduceMotion = useReducedMotion();
   const last = useRef<HTMLLIElement>(null);
@@ -43,8 +45,11 @@ export function LiveCall({ phase, elapsed, phone, steps }: Props) {
             <ClosrMark className="size-8" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[17px] font-semibold leading-tight">Closr · Paytm AI assistant</p>
-            <p aria-live="polite" className="mt-1 flex items-center gap-2 text-sm font-medium text-sky">
+            <p className="truncate text-[17px] font-semibold leading-tight">Closr · AI assistant</p>
+            <p className="truncate text-[13px] text-white/65">
+              {app === "merchant" ? "Paytm for Business support" : "Paytm 24x7 Help"}
+            </p>
+            <p aria-live="polite" className="mt-1.5 flex items-center gap-2 text-sm font-medium text-sky">
               <span aria-hidden className="live-dot size-2 rounded-full bg-sky" />
               {connected ? "On call" : "Calling you…"}
             </p>
@@ -56,7 +61,7 @@ export function LiveCall({ phase, elapsed, phone, steps }: Props) {
         {!connected && (
           <p className="mt-4 border-t border-white/10 pt-3 text-sm leading-snug text-white/75">
             {phone ? `Pick up the call on ${displayIndianMobile(phone)}.` : "Pick up when your phone rings."} It&apos;s
-            Closr, from Paytm 24x7 Help.
+            Closr, from {app === "merchant" ? "Paytm for Business support" : "Paytm 24x7 Help"}.
           </p>
         )}
       </section>
@@ -66,11 +71,17 @@ export function LiveCall({ phase, elapsed, phone, steps }: Props) {
           Live updates
         </h2>
         {steps.length === 0 ? (
-          <p className="py-6 text-center text-sm leading-relaxed text-muted">
-            {connected
-              ? "Tell Closr what's wrong. Each step it takes shows up here."
-              : "Once you pick up, each step shows up here: what Closr understood, what it checked and what it fixed."}
-          </p>
+          <div className="pb-3 pt-6 text-center">
+            <p className="text-sm leading-relaxed text-muted">
+              {connected
+                ? "Tell Closr what's wrong. Each step it takes shows up here."
+                : "Once you pick up, each step shows up here: what Closr understood, what it checked and what it fixed."}
+            </p>
+            <p className="mt-4 flex items-center justify-center gap-1.5 text-[12px] text-faint">
+              <ShieldCheck aria-hidden size={13} />
+              Closr acts only within Paytm policy, and checks every change.
+            </p>
+          </div>
         ) : (
           <ol aria-live="polite" aria-relevant="additions" className="mt-2">
             <AnimatePresence initial={false}>

@@ -1,4 +1,4 @@
-import { humanize, inr, isIsoDate, shortDateTime } from "./format";
+import { humanize, inr, isIsoDate, lastFour, shortDateTime } from "./format";
 
 export type Data = Record<string, unknown> | undefined;
 
@@ -47,12 +47,15 @@ export function safeHttpUrl(raw: string | undefined): URL | null {
   }
 }
 
-const MONEY_KEY = /amount|total|price|subtotal|gst|value|ltv|refund(?!id)/i;
-const TOKEN_KEY = /status|state|tier|stage|reason|intent|method|outcome|priority|sentiment|language|kind|type/i;
+const MONEY_KEY = /amount|total|price|cashback|^rent|Rent|principal|outstanding|deposit|monthly|^emi|Emi|refund(?!id)/i;
+const REF_KEY = /^(rrn|utr|mid)$|(Rrn|Utr|Mid|_rrn|_utr|_mid)$/;
+const TOKEN_KEY =
+  /status|state|stage|reason|intent|method|outcome|priority|sentiment|language|kind|type|verdict|channel|category|code|signal|direction|product|mode/i;
 const MAX_TEXT = 90;
 
 function formatScalar(key: string, value: unknown): string | null {
   if (value === null || value === undefined) return null;
+  if (REF_KEY.test(key) && (typeof value === "string" || typeof value === "number")) return lastFour(String(value));
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return null;
@@ -88,6 +91,12 @@ function lowerFirst(label: string): string {
 export interface Field {
   label: string;
   value: string;
+  /** The unabbreviated value, for references shown by their last four. */
+  full?: string;
+}
+
+function fieldOf(label: string, key: string, raw: unknown, value: string): Field {
+  return REF_KEY.test(key) ? { label, value, full: String(raw) } : { label, value };
 }
 
 /**
@@ -99,14 +108,14 @@ export function keyFields(data: Data, exclude: readonly string[] = [], limit = 8
   if (!data) return [];
   const curated = pickRecord(data, "fields");
   const source = curated ?? data;
-  const skip = new Set([...exclude, "fields", "touched", "checks", "sources"]);
+  const skip = new Set([...exclude, "fields", "touched", "checks", "sources", "informationOnly", "idempotencyKey"]);
   const out: Field[] = [];
 
   for (const [key, value] of Object.entries(source)) {
     if (out.length >= limit) break;
     if (skip.has(key) || isRecord(value)) continue;
     const formatted = formatScalar(key, value);
-    if (formatted) out.push({ label: curated ? key : humanize(key), value: formatted });
+    if (formatted) out.push(fieldOf(curated ? key : humanize(key), key, value, formatted));
   }
   if (curated) return out;
 
@@ -117,7 +126,7 @@ export function keyFields(data: Data, exclude: readonly string[] = [], limit = 8
       if (out.length >= limit) break;
       if (isRecord(inner)) continue;
       const formatted = formatScalar(sub, inner);
-      if (formatted) out.push({ label: `${humanize(key)} ${lowerFirst(humanize(sub))}`, value: formatted });
+      if (formatted) out.push(fieldOf(`${humanize(key)} ${lowerFirst(humanize(sub))}`, sub, inner, formatted));
     }
   }
   return out;
