@@ -96,7 +96,8 @@ function turnReminder(customerText: string): ChatCompletionMessageParam {
     role: "system",
     content:
       `Reply in ${languageOf(customerText)}, the language of the customer's last message, even though tool results are in English. ` +
-      "Cover every outcome from this turn's tool results in order, starting with whether their money is safe and how much arrived or is being returned.",
+      "Cover every outcome from this turn's tool results in order, starting with whether their money is safe and how much arrived or is being returned. " +
+      "Give only the last four characters of any reference or dispute number.",
   };
 }
 
