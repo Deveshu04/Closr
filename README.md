@@ -78,6 +78,7 @@ Open http://localhost:3000 for the Care Console and http://localhost:3000/custom
 | `BOLNA_API_KEY`, `BOLNA_AGENT_ID` | Phone calls | `BOLNA_AGENT_ID` is printed when you create the agent |
 | `TOOLS_SECRET`, `WEBHOOK_SECRET` | Phone calls | Shared secrets Bolna presents to the tools and webhook; any long random strings |
 | `CONSOLE_KEY` | Hosted deployments | Unlocks the console when it is not served from localhost |
+| `PUBLIC_CONSOLE` | Optional | `true` opens a hosted console without a key, for a public demo with seeded data |
 | `DEMO_CUSTOMER_NAME` | Optional | Name of the demo consumer |
 
 ## Deploy on Render
@@ -85,7 +86,7 @@ Open http://localhost:3000 for the Care Console and http://localhost:3000/custom
 1. Create a **Web Service** from this repository (or use the included `render.yaml` blueprint).
 2. Build command: `npm ci && npm run build`. Start command: `npm run start:render`. Node 22.
 3. Set the environment variables above, including a long random `CONSOLE_KEY`.
-4. Open `https://<your-service>.onrender.com/?key=<CONSOLE_KEY>` once. The key is stored as a secure cookie, so the console, `/customer` and `/diagnostics` then open normally in that browser.
+4. Open `https://<your-service>.onrender.com/?key=<CONSOLE_KEY>` once (or set `PUBLIC_CONSOLE=true` for an open demo). The key is stored as a secure cookie, so the console, `/customer` and `/diagnostics` then open normally in that browser.
 
 The console is served only on localhost unless the console key is presented; the tool and webhook routes answer only with their own secrets. Demo data lives in `.data/` on the instance and can be reset from the console menu.
 

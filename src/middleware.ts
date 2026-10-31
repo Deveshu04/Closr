@@ -33,6 +33,8 @@ function isCrossSite(request: NextRequest): boolean {
 export function middleware(request: NextRequest) {
   if (isCrossSite(request)) return new NextResponse("Cross-site request refused", { status: 403 });
   if (isLocal(request)) return NextResponse.next();
+  // A hosted demo for judges can drop the key; the console then holds only seeded demo data.
+  if (process.env.PUBLIC_CONSOLE === "true") return NextResponse.next();
 
   const key = process.env.CONSOLE_KEY?.trim();
   if (!key) return new NextResponse("Console is only available locally.", { status: 403 });
