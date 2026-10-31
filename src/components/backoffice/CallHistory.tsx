@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, History, Star } from "lucide-react";
+import { Activity, Download, History, Star } from "lucide-react";
 import { type PastCall, useCallHistory } from "../hooks/useCallHistory";
 import { LIVE_PHASES } from "../hooks/useCallRequest";
 import { transcriptUrl } from "../lib/api";
@@ -109,7 +109,25 @@ export function CallHistory({ trigger, currentCallRef, now }: Props) {
       align: "right",
       cell: (c) => <span className="font-semibold text-navy">{c.actions}</span>,
     },
-    { header: "Transcript", align: "right", cell: (c) => <TranscriptButton call={c} /> },
+    {
+      header: "Record",
+      align: "right",
+      cell: (c) => (
+        <div className="flex justify-end gap-1.5">
+          <a
+            href={`/diagnostics?call=${encodeURIComponent(c.callRef)}`}
+            target="_blank"
+            rel="noopener"
+            title="Call health: what Closr heard and did, with the recording"
+            aria-label={`Call health for call ${c.callRef}`}
+            className="grid size-8 place-items-center rounded-md border border-rule text-navy transition-colors hover:border-sky hover:bg-sky-wash"
+          >
+            <Activity aria-hidden size={15} strokeWidth={2.25} />
+          </a>
+          <TranscriptButton call={c} />
+        </div>
+      ),
+    },
   ];
 
   if (!loaded) {
