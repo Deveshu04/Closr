@@ -6,7 +6,8 @@
     "dev": "next dev -H 127.0.0.1",
     "build": "next build",
     "start": "next start -H 127.0.0.1",
-    "lint": "eslint"
+    "lint": "eslint",
+    "start:render": "next start -H 0.0.0.0 -p ${PORT:-3000}"
   },
   "dependencies": {
     "lucide-react": "^1.65.0",
@@ -26,5 +27,8 @@
     "eslint-config-next": "15.5.28",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
