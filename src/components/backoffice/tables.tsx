@@ -86,6 +86,11 @@ function newestFirst<T>(rows: T[], at: (row: T) => string | undefined): T[] {
 
 const dash = <span className="text-faint">—</span>;
 
+const DISPUTE_KIND: Record<Dispute["kind"], string> = {
+  debited_not_credited: "Debited, not credited",
+  credit_not_received: "Credit not received",
+};
+
 function IdCell({ id, sub }: { id: ReactNode; sub?: ReactNode }) {
   return (
     <div>
@@ -239,7 +244,16 @@ export function buildTables(state: ConsoleState, ctx: Context): Record<TabId, Ta
       header: "Status",
       cell: (t) => (
         <div>
-          <StatusPill value={t.status} />
+          {t.status === "flagged" && t.flag ? (
+            <span
+              title={`${t.flag.reason} · flagged ${shortDateTime(t.flag.flaggedAt)}, was ${humanize(t.flag.previousStatus).toLowerCase()}`}
+              className="cursor-help"
+            >
+              <StatusPill value={t.status} />
+            </span>
+          ) : (
+            <StatusPill value={t.status} />
+          )}
           {t.disputeId && <Flag tone="muted">Dispute {lastFour(t.disputeId)}</Flag>}
         </div>
       ),
@@ -320,9 +334,13 @@ export function buildTables(state: ConsoleState, ctx: Context): Record<TabId, Ta
       },
     },
     {
-      header: "Reason",
-      minor: true,
-      cell: (d) => <p className="line-clamp-2 max-w-[14rem] text-[13px] text-muted">{d.reason}</p>,
+      header: "Kind · reason",
+      cell: (d) => (
+        <div className="max-w-[14rem]">
+          <p className="whitespace-nowrap text-[13px] font-semibold text-ink">{DISPUTE_KIND[d.kind] ?? "UPI dispute"}</p>
+          <p className="mt-0.5 line-clamp-2 text-[12.5px] text-muted">{d.reason}</p>
+        </div>
+      ),
     },
     { header: "Status", cell: (d) => <StatusPill value={d.status} /> },
     {

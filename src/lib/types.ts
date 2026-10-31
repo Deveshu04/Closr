@@ -66,7 +66,8 @@ export interface Customer {
   business?: { name: string; mid: string; category: string; address: string };
 }
 
-export type TxnStatus = "success" | "failed" | "pending" | "debited_not_credited" | "reversed";
+/** "flagged": the bank reported success but the customer says the money never arrived, so it is under investigation. */
+export type TxnStatus = "success" | "failed" | "pending" | "debited_not_credited" | "flagged" | "reversed";
 
 export interface UpiTransaction {
   id: string;
@@ -82,6 +83,7 @@ export interface UpiTransaction {
   /** RBI turn-around time for a debit that never reached the beneficiary. */
   reversal?: { deadline: string; reversedAt?: string; rrn?: string };
   disputeId?: string;
+  flag?: { reason: string; flaggedAt: string; previousStatus: TxnStatus };
   /** Merchant collections: the Soundbox that should have announced it, and whether it did. */
   deviceId?: string;
   announced?: boolean;
@@ -92,6 +94,7 @@ export interface Dispute {
   customerId: string;
   txnId: string;
   channel: "UDIR";
+  kind: "debited_not_credited" | "credit_not_received";
   reason: string;
   status: "raised" | "in_review" | "resolved";
   raisedAt: string;
@@ -222,6 +225,8 @@ export interface Approval {
 
 export interface CallRecord {
   callRef: string;
+  /** Voice calls go through Bolna; chat sessions are typed in the customer app (e.g. by deaf or hard-of-hearing customers). */
+  channel?: "voice" | "chat";
   phone: string;
   customerId?: string;
   bolnaExecutionId?: string;

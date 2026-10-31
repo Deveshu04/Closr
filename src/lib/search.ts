@@ -5,7 +5,7 @@ export interface WebAnswer {
   sources: { title: string; url: string }[];
 }
 
-const SEARCH_TIMEOUT_MS = 9000;
+const SEARCH_TIMEOUT_MS = 15000;
 const OFFICIAL_DOMAINS = ["rbi.org.in", "npci.org.in", "gov.in", "paytm.com"];
 
 let client: OpenAI | null = null;

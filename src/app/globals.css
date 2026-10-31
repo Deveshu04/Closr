@@ -17,7 +17,8 @@
   --color-muted: #5a6780;
   --color-faint: #8b95a7;
   --color-rule: #dfe4eb;
-  --color-amber: #b77d00;
+  /* Deep enough for 4.5:1 as small text on white and on amber-wash; amber-bright is for fills. */
+  --color-amber: #946500;
   --color-amber-bright: #f2a900;
   --color-amber-wash: #fff4d9;
   --color-leaf: #0d7f57;
@@ -204,6 +205,38 @@ body {
   }
 }
 
+/* Closr composing a reply: three dots rising in turn. */
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.typing-dots > span {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 9999px;
+  background: var(--color-muted);
+  animation: typing 1.2s ease-in-out infinite;
+}
+.typing-dots > span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dots > span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
 /* The perforated edge on handoff slips. */
 .perforated {
   -webkit-mask: radial-gradient(circle 5px at 0 50%, transparent 98%, #000) 0 0 / 100% 16px repeat-y;
@@ -231,6 +264,10 @@ body {
   .call-halo {
     animation: none;
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-sky) 45%, transparent);
+  }
+  .typing-dots > span {
+    animation: none;
+    opacity: 0.7;
   }
   .row-touched > td,
   .row-touched > td:first-child {

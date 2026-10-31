@@ -1,28 +1,87 @@
 "use client";
 
-import { ArrowUpRight, CircleCheck, Headset, PhoneCall, PhoneOff, Star } from "lucide-react";
-import { useId, useState } from "react";
+import {
+  ArrowUpRight,
+  CircleCheck,
+  Headset,
+  type LucideIcon,
+  MessageSquarePlus,
+  MessageSquareText,
+  PhoneCall,
+  PhoneOff,
+  Star,
+} from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { CallRecord } from "@/lib/types";
 import { StatusPill } from "../StatusPill";
 import { clockTime, duration } from "../lib/format";
+import { type Channel, channelOf } from "../lib/records";
 import { readRatings, saveRating } from "../lib/ratings";
 import { BUBBLE } from "./LiveCall";
 import type { Outcome, TicketRef } from "./story";
 
 const STAR_WORDS = ["", "Poor", "Fair", "Okay", "Good", "Excellent"];
 
+const COPY: Record<
+  Channel,
+  {
+    dropped: string;
+    resolved: string;
+    ended: string;
+    endedIcon: LucideIcon;
+    nothing: string;
+    handoffNote: string;
+    noun: string;
+    again: string;
+    againIcon: LucideIcon;
+  }
+> = {
+  voice: {
+    dropped: "Call disconnected",
+    resolved: "Sorted on the call",
+    ended: "Call ended",
+    endedIcon: PhoneOff,
+    nothing: "No changes were made on this call. If something still isn't right, request another call back.",
+    handoffNote: "They already have the full details of this call, so you won't need to explain again.",
+    noun: "call",
+    again: "Request another call back",
+    againIcon: PhoneCall,
+  },
+  chat: {
+    dropped: "Chat disconnected",
+    resolved: "Sorted in this chat",
+    ended: "Chat ended",
+    endedIcon: MessageSquareText,
+    nothing: "No changes were made in this chat. If something still isn't right, start a new chat.",
+    handoffNote: "They already have this whole chat, so you won't need to explain again.",
+    noun: "chat",
+    again: "Start a new chat",
+    againIcon: MessageSquarePlus,
+  },
+};
+
 interface Props {
-  call: CallRecord;
+  call: Pick<CallRecord, "callRef" | "status" | "startedAt" | "endedAt" | "durationSec" | "channel">;
   elapsed: number | null;
   outcomes: Outcome[];
   handoffs: Outcome[];
   tickets: TicketRef[];
   onRequestAgain: () => void;
+  /** Moves keyboard and screen-reader focus to the summary, for when it replaces the control that had focus. */
+  focusOnMount?: boolean;
 }
 
-export function CallResolution({ call, elapsed, outcomes, handoffs, tickets, onRequestAgain }: Props) {
+export function CallResolution({ call, elapsed, outcomes, handoffs, tickets, onRequestAgain, focusOnMount }: Props) {
+  const copy = COPY[channelOf(call)];
   const dropped = call.status === "failed";
   const resolved = outcomes.length > 0 && outcomes.every((o) => o.tone === "done") && handoffs.length === 0;
+  const heading = useRef<HTMLHeadingElement>(null);
+  const EndedIcon = copy.endedIcon;
+  const AgainIcon = copy.againIcon;
+
+  useEffect(() => {
+    if (focusOnMount) heading.current?.focus({ preventScroll: true });
+  }, [focusOnMount]);
 
   return (
     <div className="space-y-4 p-4">
@@ -34,12 +93,17 @@ export function CallResolution({ call, elapsed, outcomes, handoffs, tickets, onR
             {resolved ? (
               <CircleCheck aria-hidden size={20} strokeWidth={2.25} />
             ) : (
-              <PhoneOff aria-hidden size={18} strokeWidth={2.25} />
+              <EndedIcon aria-hidden size={18} strokeWidth={2.25} />
             )}
           </span>
           <div className="min-w-0 flex-1">
-            <h2 id="resolution-heading" className="text-[17px] font-semibold leading-tight text-ink">
-              {dropped ? "Call disconnected" : resolved ? "Sorted on the call" : "Call ended"}
+            <h2
+              id="resolution-heading"
+              ref={heading}
+              tabIndex={-1}
+              className="text-[17px] font-semibold leading-tight text-ink focus:outline-none"
+            >
+              {dropped ? copy.dropped : resolved ? copy.resolved : copy.ended}
             </h2>
             <p className="figures mt-0.5 text-[13px] text-muted">
               {(call.durationSec !== undefined || elapsed !== null) && (
@@ -59,9 +123,7 @@ export function CallResolution({ call, elapsed, outcomes, handoffs, tickets, onR
               ))}
             </ul>
           ) : (
-            <p className="mt-2 text-sm leading-relaxed text-muted">
-              No changes were made on this call. If something still isn&apos;t right, request another call back.
-            </p>
+            <p className="mt-2 text-sm leading-relaxed text-muted">{copy.nothing}</p>
           )}
 
           {tickets.length > 0 && (
@@ -90,29 +152,27 @@ export function CallResolution({ call, elapsed, outcomes, handoffs, tickets, onR
       </section>
 
       {handoffs.map((h) => (
-        <section key={h.id} aria-label="Specialist call back" className="flex items-start gap-3.5 rounded-2xl bg-navy px-5 py-4 text-white shadow-[0_18px_36px_-22px_rgb(0_46_110/0.9)]">
+        <section key={h.id} aria-label="Specialist follow-up" className="flex items-start gap-3.5 rounded-2xl bg-navy px-5 py-4 text-white shadow-[0_18px_36px_-22px_rgb(0_46_110/0.9)]">
           <span className="grid size-11 shrink-0 place-items-center rounded-full bg-sky text-navy">
             <Headset aria-hidden size={21} strokeWidth={2.25} />
           </span>
           <div className="min-w-0 pt-0.5">
             <p className="text-[15.5px] font-semibold leading-snug">{h.title}</p>
-            <p className="mt-1 text-[13px] leading-snug text-white/70">
-              They already have the full details of this call, so you won&apos;t need to explain again.
-            </p>
+            <p className="mt-1 text-[13px] leading-snug text-white/75">{copy.handoffNote}</p>
             {h.detail && <p className="figures mt-1.5 text-[12.5px] font-medium text-sky">{h.detail}</p>}
           </div>
         </section>
       ))}
 
-      <RateCall key={call.callRef} callRef={call.callRef} />
+      <RateCall key={call.callRef} callRef={call.callRef} noun={copy.noun} />
 
       <button
         type="button"
         onClick={onRequestAgain}
         className="inline-flex h-13 w-full items-center justify-center gap-2.5 rounded-xl border-[1.5px] border-navy bg-sheet text-[16px] font-semibold text-navy transition-colors hover:bg-sky-wash active:translate-y-px"
       >
-        <PhoneCall aria-hidden size={19} strokeWidth={2.25} />
-        Request another call back
+        <AgainIcon aria-hidden size={19} strokeWidth={2.25} />
+        {copy.again}
       </button>
     </div>
   );
@@ -130,12 +190,13 @@ function OutcomeRow({ outcome }: { outcome: Outcome }) {
           {outcome.title}
         </p>
         {outcome.detail && <p className="figures mt-0.5 text-[13px] leading-snug text-muted">{outcome.detail}</p>}
+        {outcome.note && <p className="mt-1 text-[13px] leading-snug text-ink/85">{outcome.note}</p>}
       </div>
     </li>
   );
 }
 
-function RateCall({ callRef }: { callRef: string }) {
+function RateCall({ callRef, noun }: { callRef: string; noun: string }) {
   const name = useId();
   const [stars, setStars] = useState(() => readRatings()[callRef] ?? 0);
   const [hover, setHover] = useState(0);
@@ -148,14 +209,14 @@ function RateCall({ callRef }: { callRef: string }) {
 
   return (
     <fieldset className="card px-5 py-4">
-      <legend className="sr-only">Rate this call</legend>
+      <legend className="sr-only">Rate this {noun}</legend>
       <p aria-hidden className="flex items-center gap-2 text-[15px] font-semibold text-ink">
         <span className="grid size-7 place-items-center rounded-full bg-amber-wash">
           <Star size={15} className="fill-amber-bright text-amber-bright" />
         </span>
         How did Closr do?
       </p>
-      <p className="mt-1 text-[13px] text-muted">Your rating goes to the Paytm care team that reviews Closr&apos;s calls.</p>
+      <p className="mt-1 text-[13px] text-muted">Your rating goes to the Paytm care team that reviews Closr&apos;s {noun}s.</p>
       <div className="mt-3 flex items-center gap-3">
         <div className="flex gap-0.5" onMouseLeave={() => setHover(0)}>
           {[1, 2, 3, 4, 5].map((n) => (
@@ -191,7 +252,7 @@ function RateCall({ callRef }: { callRef: string }) {
         )}
       </div>
       <p aria-live="polite" className="mt-1.5 min-h-5 text-sm text-ink">
-        {stars ? `Thanks! You rated this call ${stars} out of 5.` : "Tap a star to rate"}
+        {stars ? `Thanks! You rated this ${noun} ${stars} out of 5.` : "Tap a star to rate"}
       </p>
     </fieldset>
   );

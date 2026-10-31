@@ -120,6 +120,7 @@ function StepRow({ step }: { step: Step }) {
           {step.text}
         </p>
         {step.detail && <p className="figures mt-0.5 text-[13px] leading-snug text-muted">{step.detail}</p>}
+        {step.note && <p className="mt-1 text-[13px] leading-snug text-ink/85">{step.note}</p>}
       </div>
     </div>
   );

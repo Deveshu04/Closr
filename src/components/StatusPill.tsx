@@ -1,6 +1,8 @@
 import { humanize } from "./lib/format";
 
 const TONES: { match: RegExp; className: string }[] = [
+  // A flag is an open investigation, not a failure: the bank said success and it may yet be confirmed.
+  { match: /^flagged$/, className: "bg-amber-wash text-amber ring-1 ring-inset ring-amber-bright/50" },
   { match: /fail|reject|cancel|deni|expired|offline|not_credit|frozen|closed/, className: "bg-brick-wash text-brick" },
   { match: /progress|processing|review|dialing|ringing/, className: "bg-sky-wash text-navy" },
   { match: /pending|await|open|raised|escalat|hold|stuck/, className: "bg-amber-wash text-amber" },
@@ -12,6 +14,7 @@ const TONES: { match: RegExp; className: string }[] = [
 
 const LABELS: Record<string, string> = {
   debited_not_credited: "Debited, not credited",
+  flagged: "Flagged · under investigation",
   pending_approval: "Awaiting approval",
   in_progress: "In progress",
   in_review: "In review",

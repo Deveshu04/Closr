@@ -12,7 +12,7 @@ import { useApprovals } from "./hooks/useApprovals";
 import { LIVE_PHASES } from "./hooks/useCallRequest";
 import { useConsoleState } from "./hooks/useConsoleState";
 import { chronological } from "./lib/moments";
-import { demoCustomer } from "./lib/records";
+import { channelOf, demoCustomer } from "./lib/records";
 import { MomentsTimeline } from "./MomentsTimeline";
 
 const POLL_MS = 700;
@@ -67,13 +67,16 @@ export function Console() {
   const customer = role === "demo" ? options.find((o) => o.kind === profile)?.customer : callCustomer;
   const customerPulse = customer ? isPulsing(pulses, [customer.id], Date.now()) : undefined;
   const displayName = customer ? (customer.kind === "merchant" ? (customer.business?.name ?? customer.name) : customer.name) : undefined;
+  const chat = channelOf(call) === "chat";
   const callerLabel = displayName
     ? role === "live"
-      ? `${displayName}, on this call`
+      ? `${displayName}, ${chat ? "in this chat" : "on this call"}`
       : role === "last"
-        ? `${displayName}, last call`
+        ? `${displayName}, last ${chat ? "chat" : "call"}`
         : `${displayName}, demo ${profile}`
-    : "On this call";
+    : chat
+      ? "In this chat"
+      : "On this call";
 
   return (
     <MotionConfig reducedMotion="user">

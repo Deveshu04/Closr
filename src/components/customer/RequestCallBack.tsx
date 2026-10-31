@@ -10,6 +10,7 @@ import {
   Landmark,
   LoaderCircle,
   type LucideIcon,
+  MessageSquareText,
   PhoneCall,
   PhoneMissed,
   Receipt,
@@ -55,12 +56,14 @@ interface Props {
   request: CallRequest;
   /** The last call never connected, so say so before asking again. */
   lastCallMissed: boolean;
+  onChat: () => void;
 }
 
-export function RequestCallBack({ app, firstName, request, lastCallMissed }: Props) {
+export function RequestCallBack({ app, firstName, request, lastCallMissed, onChat }: Props) {
   const copy = COPY[app];
   const inputId = useId();
   const hintId = useId();
+  const chatHintId = useId();
   const { phone, showInvalid, starting, busy, error } = request;
 
   return (
@@ -147,9 +150,29 @@ export function RequestCallBack({ app, firstName, request, lastCallMissed }: Pro
             {error}
           </p>
         )}
+
+        <p aria-hidden className="my-4 flex items-center gap-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted">
+          <span className="h-px flex-1 bg-rule" />
+          or
+          <span className="h-px flex-1 bg-rule" />
+        </p>
+        <button
+          type="button"
+          onClick={onChat}
+          aria-describedby={chatHintId}
+          className="inline-flex h-13 w-full items-center justify-center gap-2.5 rounded-xl border-[1.5px] border-navy bg-sheet text-[17px] font-semibold text-navy transition-colors hover:bg-sky-wash active:translate-y-px"
+        >
+          <MessageSquareText aria-hidden size={20} strokeWidth={2.25} />
+          Chat with Closr
+        </button>
+        <p id={chatHintId} className="mt-2 text-[13px] leading-snug text-muted">
+          <span className="font-semibold text-ink">Prefer to type?</span> Same help, no call needed. Made for anyone who is
+          deaf or hard of hearing, or can&apos;t talk right now.
+        </p>
+
         <p className="mt-4 flex items-start gap-2 border-t border-rule pt-3 text-xs leading-snug text-muted">
           <Info aria-hidden size={14} className="mt-px shrink-0" />
-          Prototype: calls only reach numbers verified on our Bolna developer account.
+          Prototype: call backs only reach numbers verified on our Bolna developer account. Chat works for everyone.
         </p>
       </form>
 

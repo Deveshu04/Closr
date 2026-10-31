@@ -4,6 +4,7 @@ import {
   BadgeCheck,
   BookCheck,
   CircleAlert,
+  Flag,
   Gift,
   HandCoins,
   Headset,
@@ -22,20 +23,51 @@ import {
   Volume2,
 } from "lucide-react";
 import { ESCALATION_CALLBACK_HOURS } from "@/lib/policy";
-import type { Approval, ConsoleState, Moment, MomentStatus, Payout, ProfileKind, SystemName } from "@/lib/types";
+import type {
+  Approval,
+  CallRecord,
+  ConsoleState,
+  Moment,
+  MomentKind,
+  MomentStatus,
+  Payout,
+  ProfileKind,
+  SystemName,
+} from "@/lib/types";
 import { approvalForMoment } from "../hooks/useApprovals";
+import { type Source, type Verdict, readSources, readVerdict } from "../lib/claims";
 import { pickNumber, pickString } from "../lib/data";
 import { humanize, inr, shortDate, shortDateTime, timeOfDay, weekdayDate } from "../lib/format";
-import { type RecordBook, type RecordHit, type RecordType, recordsFor, repeatedDeductions, touchedRecords } from "../lib/records";
+import {
+  type Channel,
+  type RecordBook,
+  type RecordHit,
+  type RecordType,
+  channelOf,
+  recordsFor,
+  repeatedDeductions,
+  touchedRecords,
+} from "../lib/records";
 
 export type Tone = "progress" | "done" | "waiting" | "problem" | "handoff";
+
+/** A rule the customer quoted, as checked against official sources. */
+export interface ClaimCheck {
+  said?: string;
+  verdict?: Verdict;
+  sources: Source[];
+}
 
 /** One line of the customer's live feed: what Closr did, in the customer's words. */
 export interface Step {
   id: string;
+  kind: MomentKind;
   icon: LucideIcon;
   text: string;
   detail?: string;
+  /** A plain-language sentence on what happens next. */
+  note?: string;
+  claim?: ClaimCheck;
   tone: Tone;
   /** A confirmation of the step above it, drawn small. */
   minor?: boolean;
@@ -46,6 +78,7 @@ export interface Outcome {
   icon: LucideIcon;
   title: string;
   detail?: string;
+  note?: string;
   tone: Tone;
 }
 
@@ -58,6 +91,7 @@ export interface TicketRef {
 
 export interface CallerRecords extends RecordBook {
   kind: ProfileKind;
+  channel: Channel;
   approvals: Approval[];
 }
 
@@ -69,16 +103,24 @@ const TONE: Record<MomentStatus, Tone> = {
   failed: "problem",
 };
 
-/** The shared state holds every customer; only the caller's own records may reach their screen. */
-export function callerRecords(state: ConsoleState): CallerRecords {
-  const customerId = state.call?.customerId;
+/** Where the conversation is happening, as the customer would put it. */
+const HERE: Record<Channel, string> = { voice: "on this call", chat: "in this chat" };
+
+/**
+ * The shared state holds every customer; only the caller's own records may reach their screen.
+ * `call` defaults to the console's active call; a chat passes its own session once the state has moved on.
+ */
+export function callerRecords(
+  state: ConsoleState,
+  call: Pick<CallRecord, "callRef" | "customerId" | "channel"> | null = state.call,
+): CallerRecords {
+  const customerId = call?.customerId;
   const book = recordsFor(state, customerId);
   return {
     ...book,
     kind: book.customers[0]?.kind ?? "consumer",
-    approvals: customerId
-      ? state.approvals.filter((a) => a.callRef === state.call?.callRef && a.customerId === customerId)
-      : [],
+    channel: channelOf(call),
+    approvals: customerId ? state.approvals.filter((a) => a.callRef === call?.callRef && a.customerId === customerId) : [],
   };
 }
 
@@ -87,8 +129,8 @@ function compact(parts: (string | false | undefined | null)[]): string | undefin
   return kept.length ? kept.join(" · ") : undefined;
 }
 
-function refTail(id: string | undefined): string | undefined {
-  return id ? `Ref …${id.replace(/\s/g, "").slice(-4)}` : undefined;
+function refTail(id: string | undefined, label = "Ref"): string | undefined {
+  return id ? `${label} …${id.replace(/\s/g, "").slice(-4)}` : undefined;
 }
 
 function bankOf(records: CallerRecords): string {
@@ -119,6 +161,7 @@ function wording(moment: Moment): string {
 }
 
 type Intent =
+  | "flag"
   | "dispute"
   | "reversal"
   | "cashback"
@@ -137,7 +180,13 @@ function intentOf(moment: Moment, hits: RecordHit[]): Intent | null {
   if (payout) return payout.kind;
   if (moment.system === "crm" && /link/.test(words)) return "bank_link";
   if (/replacement/.test(words)) return "replacement";
-  if (hitOf(hits, "dispute") || pickString(moment.data, "disputeId") || /dispute/.test(moment.title.toLowerCase())) {
+  const dispute = hitOf(hits, "dispute")?.record;
+  const flaggedTxn = hitOf(hits, "transaction")?.record.status === "flagged";
+  // Ticket notes mention the flag too, so the wording only counts on the UPI step itself.
+  if (dispute?.kind === "credit_not_received" || flaggedTxn || (moment.system === "upi" && /\bflag/.test(words))) {
+    return "flag";
+  }
+  if (dispute || pickString(moment.data, "disputeId") || /dispute/.test(moment.title.toLowerCase())) {
     return "dispute";
   }
   if (hitOf(hits, "settlement") || moment.system === "settlements") return "settlement_retry";
@@ -154,21 +203,26 @@ function intentOf(moment: Moment, hits: RecordHit[]): Intent | null {
   return txn || moment.system === "upi" ? "dispute" : null;
 }
 
+/** `failed` is completed with where the customer is, e.g. "… on this call". */
 const INTENT_META: Record<Intent, { icon: LucideIcon; doing: string; failed: string }> = {
-  dispute: { icon: Scale, doing: "Raising a UPI dispute…", failed: "Couldn't raise the dispute on this call" },
-  reversal: { icon: RotateCcw, doing: "Checking your reversal…", failed: "Couldn't confirm the reversal yet" },
-  cashback: { icon: Gift, doing: "Crediting your cashback…", failed: "Couldn't credit the cashback on this call" },
-  rent_refund: { icon: Receipt, doing: "Refunding your Soundbox rent…", failed: "Couldn't refund the rent on this call" },
-  settlement_retry: { icon: Landmark, doing: "Retrying your settlement…", failed: "Couldn't retry the settlement on this call" },
+  flag: { icon: Flag, doing: "Flagging your payment for investigation…", failed: "Couldn't flag the payment" },
+  dispute: { icon: Scale, doing: "Raising a UPI dispute…", failed: "Couldn't raise the dispute" },
+  reversal: { icon: RotateCcw, doing: "Checking your reversal…", failed: "Couldn't confirm the reversal" },
+  cashback: { icon: Gift, doing: "Crediting your cashback…", failed: "Couldn't credit the cashback" },
+  rent_refund: { icon: Receipt, doing: "Refunding your Soundbox rent…", failed: "Couldn't refund the rent" },
+  settlement_retry: { icon: Landmark, doing: "Retrying your settlement…", failed: "Couldn't retry the settlement" },
   device: { icon: Speaker, doing: "Working on your Soundbox remotely…", failed: "Couldn't fix your Soundbox remotely" },
-  replacement: { icon: Speaker, doing: "Booking a replacement Soundbox…", failed: "Couldn't book a replacement on this call" },
-  bank_link: { icon: Landmark, doing: "Sending you a secure link…", failed: "Couldn't send the link on this call" },
-  billing_stop: { icon: Receipt, doing: "Stopping rent on your returned Soundbox…", failed: "Couldn't stop the rent on this call" },
-  grievance: { icon: HandCoins, doing: "Sending your complaint to the lender…", failed: "Couldn't send the complaint on this call" },
-  ticket: { icon: LifeBuoy, doing: "Opening a request for our team…", failed: "Couldn't open a request on this call" },
+  replacement: { icon: Speaker, doing: "Booking a replacement Soundbox…", failed: "Couldn't book a replacement" },
+  bank_link: { icon: Landmark, doing: "Sending you a secure link…", failed: "Couldn't send the link" },
+  billing_stop: { icon: Receipt, doing: "Stopping rent on your returned Soundbox…", failed: "Couldn't stop the rent" },
+  grievance: { icon: HandCoins, doing: "Sending your complaint to the lender…", failed: "Couldn't send the complaint" },
+  ticket: { icon: LifeBuoy, doing: "Opening a request for our team…", failed: "Couldn't open a request" },
 };
 
-type Line = Omit<Step, "id" | "tone">;
+const FLAG_NOTE =
+  "We've flagged this payment for investigation; your bank and the receiver's bank will be asked to confirm the credit.";
+
+type Line = Omit<Step, "id" | "tone" | "kind">;
 
 function payoutLine(payout: Payout | undefined, kind: Payout["kind"], moment: Moment, records: CallerRecords): Line {
   const amount = payout?.amount ?? pickNumber(moment.data, "amount");
@@ -240,9 +294,25 @@ function describeAction(moment: Moment, records: CallerRecords): Line | null {
   if (!intent) return tone === "done" ? { icon: BadgeCheck, text: "Updated your account" } : null;
   const meta = INTENT_META[intent];
   if (tone === "progress") return { icon: meta.icon, text: meta.doing };
-  if (tone === "problem") return { icon: CircleAlert, text: meta.failed };
+  if (tone === "problem") return { icon: CircleAlert, text: `${meta.failed} ${HERE[records.channel]}` };
 
   switch (intent) {
+    case "flag": {
+      const dispute = hitOf(hits, "dispute")?.record;
+      // The record, not the step's payload, says which payment was flagged and for how much.
+      const txn = hitOf(hits, "transaction")?.record ?? records.transactions.find((t) => t.id === dispute?.txnId);
+      const expectedBy = dispute?.expectedBy ?? pickString(moment.data, "expectedBy");
+      return {
+        icon: Flag,
+        text: "Payment flagged for investigation",
+        detail: compact([
+          txn && `${inr(txn.amount)} to ${txn.counterparty.name}`,
+          refTail(dispute?.id ?? pickString(moment.data, "disputeId"), "dispute ref"),
+          expectedBy && `update by ${weekdayDate(expectedBy)}`,
+        ]),
+        note: FLAG_NOTE,
+      };
+    }
     case "dispute": {
       const dispute = hitOf(hits, "dispute")?.record;
       const txn = hitOf(hits, "transaction")?.record ?? records.transactions.find((t) => t.id === dispute?.txnId);
@@ -319,7 +389,11 @@ function describeLookup(moment: Moment, records: CallerRecords): Line | null {
 
   if (tone === "problem") {
     // A failed lookup elsewhere is usually Closr asking which record was meant; the call carries on.
-    return system === "crm" ? { icon: CircleAlert, text: "Couldn't find an account on this number" } : null;
+    if (system !== "crm") return null;
+    return {
+      icon: CircleAlert,
+      text: records.channel === "chat" ? "Couldn't find your account" : "Couldn't find an account on this number",
+    };
   }
 
   switch (system) {
@@ -338,15 +412,21 @@ function describeLookup(moment: Moment, records: CallerRecords): Line | null {
       }
       const [txn] = txns;
       if (txns.length === 1 && txn) {
+        // What the lookup saw, not the status Closr changed it to afterwards.
+        const seen = pickString(moment.data, "status") ?? txn.status;
         return {
           icon: ArrowLeftRight,
           text: `Found your ${inr(txn.amount)} payment to ${txn.counterparty.name}`,
           detail:
-            txn.status === "debited_not_credited"
+            seen === "debited_not_credited"
               ? `Debited ${shortDateTime(txn.at)} · it didn't reach them`
-              : txn.status === "reversed"
+              : seen === "reversed"
                 ? "Already reversed to your account"
-                : shortDateTime(txn.at),
+                : seen === "flagged"
+                  ? "Flagged · under investigation"
+                  : seen === "success" && txn.direction === "debit"
+                    ? `Paid ${shortDateTime(txn.at)} · your bank shows it as successful`
+                    : shortDateTime(txn.at),
         };
       }
       return { icon: ArrowLeftRight, text: "Checked your recent UPI payments" };
@@ -422,15 +502,29 @@ const PAYOUT_WORD: Record<Payout["kind"], string> = {
   settlement_retry: "settlement",
 };
 
-function callbackLine(moment: Moment): Line {
+function callbackLine(moment: Moment, channel: Channel): Line {
   const hours = pickNumber(moment.data, "callbackWithinHours", "callbackHours", "callback_within_hours") ?? ESCALATION_CALLBACK_HOURS;
   const ticketId = pickString(moment.data, "ticketId") ?? moment.touched?.[0];
+  const within = `within ${hours} ${hours === 1 ? "hour" : "hours"}`;
   return {
     icon: Headset,
-    text: `A Paytm specialist will call you back within ${hours} ${hours === 1 ? "hour" : "hours"}`,
+    // Someone who chose to type may not be able to take a call, so a chat handoff is answered in writing.
+    text: channel === "chat" ? `A Paytm specialist will message you ${within}` : `A Paytm specialist will call you back ${within}`,
     detail: refTail(ticketId),
   };
 }
+
+/** Policy topics are internal tool wording; say what they are about instead. */
+function topicPhrase(topic: string): string {
+  if (/flag|credit.not.received|never (arrived|received)/i.test(topic)) return "payments that didn't arrive";
+  return `your ${inSentence(topic)}`;
+}
+
+const CLAIM_TEXT: Record<Verdict, string> = {
+  supported: "Confirmed: that's an official rule",
+  not_found: "We couldn't find that rule in official sources",
+  contradicted: "The official rule says something different",
+};
 
 function describe(moment: Moment, records: CallerRecords): Line | null {
   const tone = TONE[moment.status];
@@ -447,16 +541,18 @@ function describe(moment: Moment, records: CallerRecords): Line | null {
       return describeLookup(moment, records);
     case "policy": {
       const topic = pickString(moment.data, "topic");
-      const subject = topic ? `the rules for your ${inSentence(topic)}` : "what we can do";
+      const subject = topic ? `the rules for ${topicPhrase(topic)}` : "what we can do";
       if (tone === "progress") return { icon: ShieldCheck, text: `Checking ${subject}…` };
       const outcome = pickString(moment.data, "outcome");
       const verdict =
         outcome === "allow"
-          ? "Closr can fix this on the call"
+          ? records.channel === "chat"
+            ? "Closr can fix this right away"
+            : "Closr can fix this on the call"
           : outcome === "needs_approval"
             ? "Needs a quick approval"
             : outcome === "deny" || tone === "problem"
-              ? "Can't be done on this call"
+              ? `Can't be done ${HERE[records.channel]}`
               : undefined;
       return { icon: ShieldCheck, text: `Checked ${subject}`, detail: verdict };
     }
@@ -478,12 +574,19 @@ function describe(moment: Moment, records: CallerRecords): Line | null {
       return { icon: UserRoundCheck, text: "", detail: amount !== undefined ? `For your ${inr(amount)} ${word}` : undefined };
     }
     case "search": {
-      const claim = pickString(moment.data, "claim");
-      if (claim || pickString(moment.data, "verdict")) {
-        if (tone === "progress") return { icon: BookCheck, text: "Checking the official RBI and NPCI rules…" };
-        if (moment.status === "failed") return { icon: BookCheck, text: "Couldn't reach the official rules right now" };
-        const answer = pickString(moment.data, "answer");
-        return { icon: BookCheck, text: "Checked the official rule", detail: answer && shorten(answer, 150) };
+      const said = pickString(moment.data, "claim");
+      const verdict = readVerdict(moment);
+      if (said || pickString(moment.data, "verdict")) {
+        const claim: ClaimCheck = { said, verdict, sources: readSources(moment) };
+        if (tone === "progress") return { icon: BookCheck, text: "Checking the official RBI and NPCI rules…", claim };
+        if (moment.status === "failed") return { icon: BookCheck, text: "Couldn't reach the official rules right now", claim };
+        const answer = pickString(moment.data, "answer", "officialRule", "summary");
+        return {
+          icon: BookCheck,
+          text: verdict ? CLAIM_TEXT[verdict] : "Checked the official rule",
+          detail: answer && shorten(answer, 150),
+          claim,
+        };
       }
       const query = pickString(moment.data, "query") ?? moment.detail ?? "your question";
       if (tone === "progress") return { icon: BookCheck, text: `Looking up: ${query}` };
@@ -491,7 +594,7 @@ function describe(moment: Moment, records: CallerRecords): Line | null {
       return { icon: BookCheck, text: `Looked up: ${query}` };
     }
     case "escalated":
-      return callbackLine(moment);
+      return callbackLine(moment, records.channel);
     default:
       return null;
   }
@@ -503,11 +606,11 @@ function approvalTone(moment: Moment, records: CallerRecords): Tone {
   return approval.status === "pending" ? "waiting" : approval.status === "approved" ? "done" : "problem";
 }
 
-const APPROVAL_TEXT: Record<"waiting" | "done" | "problem", string> = {
-  waiting: "Getting a quick approval from a Paytm specialist",
-  done: "Approved by a Paytm specialist",
-  problem: "A Paytm specialist couldn't approve this on the call",
-};
+function approvalText(tone: Tone, channel: Channel): string {
+  if (tone === "done") return "Approved by a Paytm specialist";
+  if (tone === "problem") return `A Paytm specialist couldn't approve this ${HERE[channel]}`;
+  return "Getting a quick approval from a Paytm specialist";
+}
 
 /** A rule check that says "no" is information for the customer, not a failure on their account. */
 function feedTone(moment: Moment): Tone {
@@ -525,10 +628,9 @@ export function customerFeed(moments: Moment[], records: CallerRecords): Step[] 
     if (!line) continue;
     if (moment.kind === "approval") {
       const tone = approvalTone(moment, records);
-      const text = tone === "waiting" || tone === "done" || tone === "problem" ? APPROVAL_TEXT[tone] : APPROVAL_TEXT.waiting;
-      steps.push({ ...line, id: moment.id, tone, text });
+      steps.push({ ...line, id: moment.id, kind: moment.kind, tone, text: approvalText(tone, records.channel) });
     } else {
-      steps.push({ ...line, id: moment.id, tone: feedTone(moment) });
+      steps.push({ ...line, id: moment.id, kind: moment.kind, tone: feedTone(moment) });
     }
   }
   return steps.map(capitalDetail);
@@ -605,7 +707,7 @@ export function summarizeCall(
       continue;
     }
     if (moment.kind === "escalated") {
-      const line = callbackLine(moment);
+      const line = callbackLine(moment, records.channel);
       handoffs.set(moment.id, { id: moment.id, icon: line.icon, tone: "handoff", title: line.text, detail: line.detail });
       noteTickets(moment);
       continue;
@@ -615,7 +717,7 @@ export function summarizeCall(
     const line = describeAction(moment, records);
     if (!line) continue;
     const key = outcomeKey(moment, records);
-    outcomes.set(key, { id: key, icon: line.icon, tone: "done", title: line.text, detail: line.detail });
+    outcomes.set(key, { id: key, icon: line.icon, tone: "done", title: line.text, detail: line.detail, note: line.note });
   }
 
   return {

@@ -1,4 +1,5 @@
 import type {
+  CallRecord,
   ConsoleState,
   Customer,
   Device,
@@ -97,6 +98,13 @@ export function recordsFor(book: RecordBook, customerId: string | undefined): Re
 }
 
 export const PROFILE_LABEL: Record<ProfileKind, string> = { consumer: "Consumer", merchant: "Merchant" };
+
+export type Channel = NonNullable<CallRecord["channel"]>;
+
+/** Records from before chat existed, and rows that omit it, are voice calls. */
+export function channelOf(call: { channel?: unknown } | null | undefined): Channel {
+  return call?.channel === "chat" ? "chat" : "voice";
+}
 
 /** The seeded customer each demo call is placed for; the seed lists the demo customer first for each kind. */
 export function demoCustomer(customers: Customer[], kind: ProfileKind): Customer | undefined {

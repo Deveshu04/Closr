@@ -9,6 +9,7 @@ import {
   Lock,
   type LucideIcon,
   MapPin,
+  MessageSquareText,
   Phone,
   PhoneCall,
   PhoneOff,
@@ -18,19 +19,31 @@ import {
 } from "lucide-react";
 import { useId } from "react";
 import type { CallRecord, Customer, ProfileKind } from "@/lib/types";
+import { ChannelBadge } from "./ChannelBadge";
 import { type CallPhase, useCallRequest } from "./hooks/useCallRequest";
 import { duration, humanize, lastFour } from "./lib/format";
 import { displayIndianMobile } from "./lib/phone";
-import { PROFILE_LABEL, firstName } from "./lib/records";
+import { type Channel, PROFILE_LABEL, channelOf, firstName } from "./lib/records";
 import { TrustDial } from "./TrustDial";
 
-const STATUS: Record<CallPhase, { label: string; icon: LucideIcon; tone: string }> = {
+type StatusMeta = { label: string; icon: LucideIcon; tone: string };
+
+const STATUS: Record<CallPhase, StatusMeta> = {
   idle: { label: "Ready to call", icon: Phone, tone: "text-white/65" },
   dialing: { label: "Dialing", icon: PhoneOutgoing, tone: "text-sky" },
   ringing: { label: "Ringing", icon: PhoneCall, tone: "text-sky" },
   in_progress: { label: "In progress", icon: AudioLines, tone: "text-sky" },
   completed: { label: "Completed", icon: PhoneOff, tone: "text-white/75" },
   failed: { label: "Failed", icon: PhoneOff, tone: "text-[#ffb3a7]" },
+};
+
+/** A chat never rings and has no talk time; it's typed in the customer's Paytm app. */
+const CHAT_STATUS: Partial<Record<CallPhase, StatusMeta>> = {
+  dialing: { label: "Opening chat", icon: MessageSquareText, tone: "text-sky" },
+  ringing: { label: "Opening chat", icon: MessageSquareText, tone: "text-sky" },
+  in_progress: { label: "Chat in progress", icon: MessageSquareText, tone: "text-sky" },
+  completed: { label: "Chat ended", icon: MessageSquareText, tone: "text-white/75" },
+  failed: { label: "Chat failed", icon: MessageSquareText, tone: "text-[#ffb3a7]" },
 };
 
 const PROFILE_ICON: Record<ProfileKind, LucideIcon> = { consumer: UserRound, merchant: Store };
@@ -194,10 +207,9 @@ function CallerCard({ customer }: { customer: Customer }) {
   );
 }
 
-const ROLE_LABEL: Record<Props["customerRole"], string> = {
-  live: "On the call",
-  last: "Last call",
-  demo: "Calling for",
+const ROLE_LABEL: Record<Channel, Record<Props["customerRole"], string>> = {
+  voice: { live: "On the call", last: "Last call", demo: "Calling for" },
+  chat: { live: "In the chat", last: "Last chat", demo: "Calling for" },
 };
 
 export function CallPanel({
@@ -215,8 +227,10 @@ export function CallPanel({
   const hintId = useId();
   const request = useCallRequest(call, refresh, profile);
   const { phone, showInvalid, starting, error, stale, busy, live, elapsed, phase: status } = request;
+  // While a new call is being placed, `call` is still the previous session, which may have been a chat.
+  const channel: Channel = request.pending ? "voice" : channelOf(call);
 
-  const meta = STATUS[status];
+  const meta = (channel === "chat" ? CHAT_STATUS[status] : undefined) ?? STATUS[status];
   const StatusIcon = meta.icon;
 
   return (
@@ -284,7 +298,12 @@ export function CallPanel({
         </p>
       </form>
 
-      <section aria-label="Call status" className={`${SECTION} lg:w-52 lg:shrink-0 xl:w-auto`}>
+      <section aria-label={channel === "chat" ? "Chat status" : "Call status"} className={`${SECTION} lg:w-52 lg:shrink-0 xl:w-auto`}>
+        {call && (
+          <div className="mb-2">
+            <ChannelBadge channel={channel} tone="dark" />
+          </div>
+        )}
         <div className="flex items-center justify-between gap-3 lg:block xl:flex">
           <p aria-live="polite" className={`flex items-center gap-2.5 text-[14px] font-semibold ${meta.tone}`}>
             {live ? (
@@ -295,7 +314,7 @@ export function CallPanel({
             {meta.label}
           </p>
           <p
-            aria-label="Call time"
+            aria-label={channel === "chat" ? "Chat time" : "Call time"}
             className={`figures text-[2rem] font-semibold leading-none tracking-tight lg:mt-1.5 xl:mt-0 ${
               elapsed === null ? "text-white/25" : "text-white"
             }`}
@@ -306,7 +325,7 @@ export function CallPanel({
       </section>
 
       <section aria-label="Customer" className={`${SECTION} lg:min-w-0 lg:flex-1`}>
-        <p className="text-[13px] text-white/55">{ROLE_LABEL[customerRole]}</p>
+        <p className="text-[13px] text-white/55">{ROLE_LABEL[channel][customerRole]}</p>
         {customer ? (
           <div key={customerPulse ?? 0} className={`-mx-2 mt-1 rounded-md px-2 py-1 ${customerPulse ? "block-touched" : ""}`}>
             <CallerCard customer={customer} />

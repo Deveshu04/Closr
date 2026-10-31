@@ -4,7 +4,9 @@ import { AnimatePresence, useReducedMotion } from "motion/react";
 import { type CSSProperties, useEffect, useRef } from "react";
 import type { CallRecord, Customer, Moment, MomentKind } from "@/lib/types";
 import { TranscriptButton } from "./backoffice/CallHistory";
+import { ChannelBadge } from "./ChannelBadge";
 import type { ApprovalControls } from "./hooks/useApprovals";
+import { type Channel, channelOf } from "./lib/records";
 import { MomentRow, SPINE_LEFT } from "./moments/MomentRow";
 import { KIND_META } from "./moments/shared";
 
@@ -39,6 +41,8 @@ export function MomentsTimeline({ moments, call, customer, controls, className =
   const lastKey = last ? `${moments.length}:${last.id}:${last.status}` : "";
   const actions = moments.filter((m) => m.kind === "action" && m.status === "ok").length;
   const steps = moments.filter((m) => m.kind !== "call").length;
+  const channel = channelOf(call);
+  const noun = channel === "chat" ? "chat" : "call";
 
   useEffect(() => {
     const el = scroller.current;
@@ -51,9 +55,12 @@ export function MomentsTimeline({ moments, call, customer, controls, className =
     <section aria-labelledby="timeline-heading" className={`flex flex-col bg-paper lg:min-h-0 ${className}`}>
       <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1 px-5 pb-3 pt-5 lg:px-8">
         <div className="min-w-0">
-          <h2 id="timeline-heading" className="font-serif text-[1.625rem] font-semibold leading-tight text-navy">
-            {live || moments.length === 0 ? "On this call" : "Last call"}
-          </h2>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h2 id="timeline-heading" className="font-serif text-[1.625rem] font-semibold leading-tight text-navy">
+              {live || moments.length === 0 ? (channel === "chat" ? "In this chat" : "On this call") : `Last ${noun}`}
+            </h2>
+            {call && <ChannelBadge channel={channel} />}
+          </div>
           {customer && moments.length > 0 && (
             <p className="mt-0.5 truncate text-[14px] text-muted">
               {customer.kind === "merchant" ? (customer.business?.name ?? customer.name) : customer.name}
@@ -112,20 +119,22 @@ export function MomentsTimeline({ moments, call, customer, controls, className =
             </AnimatePresence>
           </ol>
         ) : (
-          <EmptyTimeline waiting={live} />
+          <EmptyTimeline waiting={live} channel={channel} />
         )}
       </div>
     </section>
   );
 }
 
-function EmptyTimeline({ waiting }: { waiting: boolean }) {
+function EmptyTimeline({ waiting, channel }: { waiting: boolean; channel: Channel }) {
   return (
     <div className="max-w-[40rem] pt-2">
       <p className="font-serif text-[1.75rem] leading-snug text-navy [font-variation-settings:'opsz'_40] sm:text-[2rem]">
-        {waiting
-          ? "Closr is calling the customer. Each step it takes will appear here as it happens."
-          : "Every step Closr takes on the call lands here, the moment it takes it."}
+        {!waiting
+          ? "Every step Closr takes on a call or chat lands here, the moment it takes it."
+          : channel === "chat"
+            ? "The customer is chatting with Closr in the Paytm app. Each step it takes will appear here as it happens."
+            : "Closr is calling the customer. Each step it takes will appear here as it happens."}
       </p>
       <p className="mt-3 max-w-[56ch] text-base leading-relaxed text-muted">
         It listens, pulls the records, checks policy, acts, then re-reads the system to confirm. Rules a customer cites

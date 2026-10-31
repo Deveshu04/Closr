@@ -24,7 +24,7 @@ import type {
 const DATA_DIR = path.join(process.cwd(), ".data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 /** Bump when the stored shape or seed story changes, so an old db.json is re-seeded instead of misread. */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const MOMENT_HISTORY_LIMIT = 1000;
 
 interface DbState extends SeedData {
@@ -265,6 +265,25 @@ export function raiseDisputeOnce(dispute: Dispute): { dispute: Dispute; created:
     state.disputes.push(dispute);
     txn.disputeId = dispute.id;
     return { dispute, created: true };
+  });
+}
+
+/** Flags a payment the bank marked successful and opens its dispute in one write; a second call returns the first flag. */
+export function flagTransactionOnce(
+  txnId: string,
+  reason: string,
+  dispute: Dispute,
+): { txn: UpiTransaction; dispute: Dispute; created: boolean } | null {
+  return write((state) => {
+    const txn = byId(state.transactions, txnId);
+    if (!txn) return null;
+    const existing = txn.disputeId ? byId(state.disputes, txn.disputeId) : null;
+    if (txn.status === "flagged" && existing) return { txn, dispute: existing, created: false };
+    txn.flag = { reason, flaggedAt: new Date().toISOString(), previousStatus: txn.status };
+    txn.status = "flagged";
+    state.disputes.push(dispute);
+    txn.disputeId = dispute.id;
+    return { txn, dispute, created: true };
   });
 }
 

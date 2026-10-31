@@ -49,6 +49,7 @@ export const DEMO_PROFILES: Record<ProfileKind, { id: string; placeholderPhone: 
 export const DEMO_RECORDS = {
   failedMerchantPayment: "TXN-60412",
   reversedTransfer: "TXN-60388",
+  creditNotReceived: "TXN-60426",
   billCashback: "RWD-3107",
   flightCashback: "RWD-3094",
   personalLoan: "PL-48817",
@@ -188,6 +189,14 @@ function seedConsumerDemo(seed: SeedData, clock: SeedClock): void {
         reversedAt,
         rrn: rrnAt(reversedAt, "reversal-60388"),
       },
+    }),
+    txn({
+      ...debit,
+      id: DEMO_RECORDS.creditNotReceived,
+      kind: "p2m",
+      amount: 850,
+      counterparty: { name: "Gupta General Store, Shakarpur", vpa: "guptageneral@ptsbi" },
+      at: clock.at(1, 13, 15),
     }),
     txn({
       ...debit,
@@ -612,6 +621,7 @@ function seedBackOffice(seed: SeedData, clock: SeedClock): void {
     customerId: "CUST-1002",
     txnId: "TXN-51207",
     channel: "UDIR",
+    kind: "debited_not_credited",
     reason: "Debited but not credited to merchant",
     status: "in_review",
     raisedAt: disputeRaisedAt,

@@ -57,7 +57,7 @@ export function ApprovalMoment({ moment, controls }: { moment: Moment; controls:
       {waiting && (
         <p className="mt-3 flex items-center gap-1.5 text-[13px] text-muted">
           <UserRoundCheck aria-hidden size={14} className="text-amber" />
-          Closr has told the customer a specialist is approving this. The call stays open.
+          Closr has told the customer a specialist is approving this. They&apos;re still connected.
         </p>
       )}
     </article>

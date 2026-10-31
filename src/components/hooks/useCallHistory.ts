@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import type { CallRecord } from "@/lib/types";
 import { pickNumber, pickString } from "../lib/data";
 import { RATINGS_KEY, type Ratings, readRatings } from "../lib/ratings";
+import { type Channel, channelOf } from "../lib/records";
 
 /** One row of GET /api/calls. */
 export interface PastCall {
   callRef: string;
+  channel: Channel;
   customerName: string;
   phone: string;
   status: CallRecord["status"];
@@ -35,6 +37,7 @@ function readCalls(raw: unknown): PastCall[] | null {
     return [
       {
         callRef,
+        channel: channelOf(row),
         customerName: pickString(row, "customerName") ?? "Unidentified caller",
         phone: pickString(row, "phone") ?? "",
         status: status as PastCall["status"],

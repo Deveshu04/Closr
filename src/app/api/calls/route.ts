@@ -8,6 +8,7 @@ export const runtime = "nodejs";
 export function GET() {
   const calls = listCalls().map((call) => ({
     callRef: call.callRef,
+    channel: call.channel ?? "voice",
     customerName: (call.customerId && getCustomer(call.customerId)?.name) || "Unidentified caller",
     phone: call.phone,
     status: call.status,

@@ -1,6 +1,7 @@
 "use client";
 
 import { Activity, Download, History, Star } from "lucide-react";
+import { ChannelBadge } from "../ChannelBadge";
 import { type PastCall, useCallHistory } from "../hooks/useCallHistory";
 import { LIVE_PHASES } from "../hooks/useCallRequest";
 import { transcriptUrl } from "../lib/api";
@@ -74,7 +75,14 @@ export function CallHistory({ trigger, currentCallRef, now }: Props) {
       cell: (c) => (
         <div className="min-w-0">
           <p className="max-w-[10rem] truncate font-medium text-ink">{c.customerName}</p>
-          <p className="figures mt-0.5 whitespace-nowrap text-xs text-muted">{c.phone ? maskIndianMobile(c.phone) : "Number not captured"}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <ChannelBadge channel={c.channel} />
+            {c.channel === "voice" && (
+              <span className="figures whitespace-nowrap text-xs text-muted">
+                {c.phone ? maskIndianMobile(c.phone) : "Number not captured"}
+              </span>
+            )}
+          </div>
         </div>
       ),
     },
@@ -84,10 +92,12 @@ export function CallHistory({ trigger, currentCallRef, now }: Props) {
         <div className="figures whitespace-nowrap">
           <p>{shortDateTime(c.startedAt)}</p>
           <p className="mt-0.5 text-xs text-muted">
-            {c.durationSec !== undefined ? (
-              `${duration(c.durationSec * 1000)} talk time`
-            ) : LIVE_PHASES.has(c.status) ? (
-              <span className="font-semibold text-sky">Live now</span>
+            {LIVE_PHASES.has(c.status) ? (
+              <span className="font-semibold text-navy">Live now</span>
+            ) : c.durationSec !== undefined ? (
+              `${duration(c.durationSec * 1000)} ${c.channel === "chat" ? "in chat" : "talk time"}`
+            ) : c.channel === "chat" ? (
+              "Chat ended"
             ) : (
               "No talk time"
             )}
@@ -118,8 +128,10 @@ export function CallHistory({ trigger, currentCallRef, now }: Props) {
             href={`/diagnostics?call=${encodeURIComponent(c.callRef)}`}
             target="_blank"
             rel="noopener"
-            title="Call health: what Closr heard and did, with the recording"
-            aria-label={`Call health for call ${c.callRef}`}
+            title={
+              c.channel === "chat" ? "Chat health: what Closr read and did" : "Call health: what Closr heard and did, with the recording"
+            }
+            aria-label={`${c.channel === "chat" ? "Chat" : "Call"} health for ${c.channel === "chat" ? "chat" : "call"} ${c.callRef}`}
             className="grid size-8 place-items-center rounded-md border border-rule text-navy transition-colors hover:border-sky hover:bg-sky-wash"
           >
             <Activity aria-hidden size={15} strokeWidth={2.25} />

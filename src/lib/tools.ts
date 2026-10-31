@@ -41,6 +41,7 @@ import {
   settlementNeedsNewBank,
   settlementNeedsReview,
   udirExpectedBy,
+  evaluateFlag,
   type DeviceAction,
   type DuplicateDeduction,
 } from "@/lib/policy";
@@ -790,6 +791,7 @@ const TXN_STATUS: Record<TxnStatus, string> = {
   failed: "failed",
   pending: "pending",
   debited_not_credited: "debited, not credited",
+  flagged: "flagged for investigation",
   reversed: "reversed",
 };
 
@@ -941,9 +943,19 @@ function diagnoseTxn(txn: UpiTransaction, customer: Customer, now: Date = new Da
             say: `The ${amount} from ${party} ${when} reached your account; the UPI reference ends ${lastDigits(txn.rrn)}.`,
           }
         : {
-            line: `Completed · reached ${party} · RRN ${txn.rrn}`,
-            say: `The ${amount} payment to ${party} ${when} went through and reached them; the UPI reference ends ${lastDigits(txn.rrn)}.`,
+            line: `Bank reports success · RRN ${txn.rrn}`,
+            say: `Your bank shows the ${amount} payment to ${party} ${when} as successful, UPI reference ending ${lastDigits(txn.rrn)}. If ${party} says it never reached them, I can flag it for investigation right now.`,
+            nextStep: "flag_transaction if the payee says the money never arrived",
           };
+    case "flagged": {
+      const dispute = txn.disputeId ? db.getDispute(txn.disputeId) : null;
+      return {
+        line: `Flagged ${formatDateTime(txn.flag?.flaggedAt ?? txn.at)}: bank said success, customer reports no credit${dispute ? ` · dispute ${dispute.id}` : ""}`,
+        say:
+          `The ${amount} payment to ${party} ${when} is already flagged for investigation` +
+          (dispute ? `, dispute reference ending ${lastDigits(dispute.id)}, expected to close by ${formatLongDate(dispute.expectedBy)}.` : "."),
+      };
+    }
     case "failed":
       return {
         line: "Failed before any debit",
@@ -1094,6 +1106,7 @@ async function raiseDispute(params: ToolParams, call: CallRecord): Promise<ToolR
     customerId: customer.id,
     txnId: txn.id,
     channel: "UDIR",
+    kind: "debited_not_credited",
     reason: readText(params, "reason") ?? `Debited but not credited to ${txn.counterparty.name}`,
     status: "raised",
     raisedAt: now.toISOString(),
@@ -1152,6 +1165,128 @@ async function raiseDispute(params: ToolParams, call: CallRecord): Promise<ToolR
       `Done. I've raised a UPI dispute with NPCI, reference ${ending(dispute.id)}. These usually close in ${min} to ${max} working days, ` +
       `by ${formatLongDate(dispute.expectedBy)} at the latest. ${bank} will put the ${spokenRupees(txn.amount)} back in your account, ` +
       "and you'll get an SMS when it's reversed; you don't need to do anything else.",
+  };
+}
+
+// The bank's "success" only means the debit cleared; when the payee says nothing arrived, the honest move is to
+// mark the payment as under investigation and open a credit-not-received dispute, not to argue with the customer.
+async function flagTransaction(params: ToolParams, call: CallRecord): Promise<ToolResult> {
+  const caller = requireCaller(call, "upi");
+  if (!caller.ok) return caller.result;
+  const customer = caller.value;
+  const txn = findTransaction(db.listTransactions(customer.id), txnQuery(params, ["txn_id", "txn_ref"]));
+  if (!txn) {
+    return notFound(
+      call,
+      { kind: "action", system: "upi" },
+      "Payment to flag not found",
+      readText(params, "txn_id"),
+      "I couldn't find that payment on your account. Could you tell me the amount and who you paid?",
+    ).result;
+  }
+
+  const reason = readText(params, "reason") ?? `Customer says ${txn.counterparty.name} never received it`;
+  const existing = txn.disputeId ? db.getDispute(txn.disputeId) : null;
+  if (txn.status === "flagged" && existing) {
+    db.recordMoment({
+      callRef: call.callRef,
+      kind: "action",
+      system: "upi",
+      title: "Duplicate flag caught",
+      detail: `${txn.id} is already flagged · dispute ${existing.id}`,
+      status: "ok",
+      touched: [txn.id, existing.id],
+    });
+    return {
+      ok: true,
+      status: "already_flagged",
+      txn_id: txn.id,
+      dispute_id: existing.id,
+      say: `This payment is already flagged for investigation, dispute reference ending ${lastDigits(existing.id)}, expected to close by ${formatLongDate(existing.expectedBy)}.`,
+    };
+  }
+
+  const decision = evaluateFlag(txn);
+  await showPolicy(call, { id: txn.id, topic: "flag a successful payment", amount: txn.amount }, decision);
+  if (decision.outcome === "deny") {
+    const failedPayment = txn.status === "debited_not_credited" || txn.status === "pending";
+    return {
+      ok: false,
+      status: "denied",
+      txn_id: txn.id,
+      reasons: decision.reasons,
+      say: failedPayment
+        ? "This payment already shows as failed, so instead of flagging it I'll raise a dispute for it."
+        : `I can't flag this one: ${decision.reasons[0] ?? "it doesn't qualify"}.`,
+    };
+  }
+  if (decision.outcome === "needs_approval") {
+    return escalate({ reason: decision.reasons[0] ?? "Flag outside the window", summary: reason, related_id: txn.id }, call);
+  }
+
+  const momentId = await startStep(call.callRef, {
+    kind: "action",
+    system: "upi",
+    title: "Flagging the payment for investigation",
+    detail: `${formatRupees(txn.amount)} to ${txn.counterparty.name} · bank says success · RRN ${txn.rrn}`,
+    data: { txnId: txn.id, amount: txn.amount },
+  });
+  const now = new Date();
+  const flagged = db.flagTransactionOnce(txn.id, reason, {
+    id: `UDIR-${randomDigits(10)}`,
+    customerId: customer.id,
+    txnId: txn.id,
+    channel: "UDIR",
+    kind: "credit_not_received",
+    reason,
+    status: "raised",
+    raisedAt: now.toISOString(),
+    expectedBy: udirExpectedBy(now).toISOString(),
+  });
+  if (!flagged) {
+    db.updateMoment(momentId, { status: "failed", title: "Couldn't flag the payment" });
+    return { ok: false, say: "I couldn't flag that payment on my side. I'll hand this to a specialist so it isn't lost." };
+  }
+
+  const { dispute } = flagged;
+  db.updateMoment(momentId, {
+    status: "ok",
+    title: `Payment flagged · dispute ${dispute.id} raised`,
+    detail: `Success → Flagged · credit-not-received dispute with NPCI · expected by ${formatShortDate(dispute.expectedBy)}`,
+    touched: [txn.id, dispute.id],
+    data: { txnId: txn.id, disputeId: dispute.id, amount: txn.amount, previousStatus: "success", expectedBy: dispute.expectedBy },
+  });
+  logTicket(
+    call.callRef,
+    { customerId: customer.id, relatedId: txn.id },
+    {
+      category: "upi",
+      subject: `Credit not received by ${txn.counterparty.name}`,
+      status: "open",
+      note:
+        `Bank reported success (RRN ${txn.rrn}) but the customer says ${txn.counterparty.name} never received ${formatRupees(txn.amount)}. ` +
+        `Flagged and raised credit-not-received dispute ${dispute.id}; the payee's bank must confirm the credit or the money is reversed.`,
+    },
+  );
+
+  const verified = await verifyStep(call.callRef, "upi", "Re-reading the payment status", () => {
+    const stored = db.getTransaction(txn.id);
+    return stored?.status === "flagged" && stored.disputeId === dispute.id
+      ? { passed: true, title: "Payment now shows as flagged", detail: `${txn.id} · flagged · dispute ${dispute.id} linked`, touched: [txn.id, dispute.id] }
+      : { passed: false, title: "The flag didn't stick", detail: `${txn.id} is ${stored?.status ?? "missing"}` };
+  });
+
+  return {
+    ok: true,
+    status: "flagged",
+    txn_id: txn.id,
+    dispute_id: dispute.id,
+    expected_by: formatLongDate(dispute.expectedBy),
+    verified,
+    say:
+      `Done. I've flagged the ${spokenRupees(txn.amount)} payment to ${txn.counterparty.name} for investigation and raised a credit-not-received dispute, reference ${ending(dispute.id)}. ` +
+      `Their bank now has to confirm the credit; if it never reached them, the money comes back to your ${customer.bank.bank} account. ` +
+      `Expect an update by ${formatLongDate(dispute.expectedBy)}, and you'll get an SMS.`,
   };
 }
 
@@ -2704,6 +2839,7 @@ const TOOLS = {
   send_bank_update_link: sendBankUpdateLink,
   check_rent: checkRent,
   refund_rent: refundRent,
+  flag_transaction: flagTransaction,
   search_web: searchTheWeb,
   verify_claim: verifyClaim,
   escalate,

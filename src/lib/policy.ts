@@ -110,6 +110,24 @@ export function bankCompensationDue(txn: UpiTransaction, now: Date = new Date())
   return reversalDaysLate(txn, now) * UPI_DELAY_COMPENSATION_PER_DAY;
 }
 
+export const FLAG_WINDOW_DAYS = 30;
+
+/** A bank "success" is not proof the payee got the money; a customer report inside the window is enough to investigate. */
+export function evaluateFlag(txn: UpiTransaction, now: Date = new Date()): PolicyDecision {
+  const debit = rule("The caller's own debit");
+  const success = rule("The bank reported it as successful");
+  const recent = rule(`Reported within ${FLAG_WINDOW_DAYS} days of the payment`, "needs_approval");
+  const open = rule("No dispute already open on this payment");
+  const ageDays = Math.floor((now.getTime() - new Date(txn.at).getTime()) / 86_400_000);
+  const results: RuleResult[] = [
+    txn.direction === "debit" ? debit.pass(`${formatRupees(txn.amount)} paid to ${txn.counterparty.name}`) : debit.fail("Only the payer can report a missing credit"),
+    txn.status === "success" ? success.pass(`Marked success · RRN ••${lastDigits(txn.rrn)}`) : success.fail(`Status is ${txn.status.replace(/_/g, " ")}, so it is handled as a failed payment instead`),
+    ageDays <= FLAG_WINDOW_DAYS ? recent.pass(`${ageDays} day${ageDays === 1 ? "" : "s"} ago`) : recent.fail(`${ageDays} days ago, past the window; a specialist reviews it`),
+    txn.disputeId ? open.fail("A dispute is already open") : open.pass("Nothing open yet"),
+  ];
+  return decide(results, ["The bank says success but the customer says the money never arrived: flag it and investigate"]);
+}
+
 export function udirExpectedBy(raisedAt: Date): Date {
   return addBusinessDays(raisedAt, UDIR_RESOLUTION_WORKING_DAYS.max);
 }
