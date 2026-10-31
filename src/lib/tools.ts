@@ -42,6 +42,7 @@ import {
   settlementNeedsReview,
   udirExpectedBy,
   evaluateFlag,
+  evaluateOffer,
   type DeviceAction,
   type DuplicateDeduction,
 } from "@/lib/policy";
@@ -53,6 +54,7 @@ import type {
   CallRecord,
   Customer,
   Dispute,
+  FollowUp,
   Loan,
   Moment,
   MomentKind,
@@ -65,6 +67,7 @@ import type {
   Ticket,
   TxnStatus,
   UpiTransaction,
+  Workflow,
 } from "@/lib/types";
 
 export interface ToolResult {
@@ -728,8 +731,64 @@ async function requestApproval(request: PayoutRequest, view: PayoutView): Promis
   return payoutOutcome(settled, view);
 }
 
+const WORKFLOW_OF: Record<Payout["kind"], Workflow> = {
+  cashback: "cashback",
+  rent_refund: "rent_refunds",
+  settlement_retry: "settlement_retries",
+};
+
+// Shadow mode: Closr has done the diagnosis and policy check, but a specialist moves the money.
+function suggestOnly(request: PayoutRequest, view: PayoutView): ToolResult {
+  const { call, customer, subjectId, amount, brief } = request;
+  const suggestion = `${view.actionTitle} to ${view.destination}`;
+  const ticket = logTicket(
+    call.callRef,
+    { customerId: customer.id, relatedId: subjectId },
+    {
+      ...view.ticket,
+      status: "escalated",
+      priority: "normal",
+      note: `Shadow mode: Closr suggests "${suggestion}" (${brief}). A specialist completes it.`,
+    },
+  );
+  db.recordMoment({
+    callRef: call.callRef,
+    kind: "escalated",
+    system: view.system,
+    status: "waiting",
+    title: `Shadow mode · Closr suggests: ${suggestion}`,
+    detail: `Trust dial L0 for ${view.noun}: a specialist reviews and completes it · ticket ${ticket.id}`,
+    touched: [ticket.id, subjectId, ...view.touched],
+    data: { shadow: true, suggestion, workflow: WORKFLOW_OF[request.kind], amount, subjectId, ticketId: ticket.id },
+  });
+  return {
+    ok: true,
+    status: "suggested",
+    ticket_id: ticket.id,
+    say:
+      `I've checked everything and passed the ${spokenRupees(amount)} ${view.noun} to a Paytm specialist, who will complete it ` +
+      `within ${ESCALATION_CALLBACK_HOURS} hours. You'll get an SMS when it's done.`,
+  };
+}
+
+/** Policy says what is allowed; the trust dial says how much of it Closr may do alone for this workflow. */
 async function movePayout(request: PayoutRequest): Promise<ToolResult> {
   const view = payoutView(request.kind, request.subjectId, request.customer, request.amount);
+  const workflow = WORKFLOW_OF[request.kind];
+  const level = db.getAutonomy()[workflow];
+  if (level === 0) return suggestOnly(request, view);
+  if (level === 1 && request.decision.outcome === "allow") {
+    db.recordMoment({
+      callRef: request.call.callRef,
+      kind: "policy",
+      system: "policy",
+      status: "waiting",
+      title: `Trust dial L1 · every ${view.noun} needs one tap`,
+      detail: `Within the limit, but ${view.noun} is set to Approve, so a specialist confirms ${formatRupees(request.amount)}`,
+      data: { autonomy: 1, workflow, outcome: "needs_approval" },
+    });
+    return requestApproval({ ...request, brief: `Trust dial L1 (Approve): ${request.brief}` }, view);
+  }
   return request.decision.outcome === "needs_approval" ? requestApproval(request, view) : payNow(request, view);
 }
 
@@ -1152,6 +1211,8 @@ async function raiseDispute(params: ToolParams, call: CallRecord): Promise<ToolR
       : { passed: false, title: "NPCI doesn't show the dispute", detail: `${dispute.id} is missing or unlinked` };
   });
 
+  scheduleCheckBack(call.callRef, customer, "dispute", dispute, txn);
+
   const { min, max } = UDIR_RESOLUTION_WORKING_DAYS;
   return {
     ok: true,
@@ -1207,7 +1268,7 @@ async function flagTransaction(params: ToolParams, call: CallRecord): Promise<To
   }
 
   const decision = evaluateFlag(txn);
-  await showPolicy(call, { id: txn.id, topic: "flag a successful payment", amount: txn.amount }, decision);
+  await showPolicy(call, { id: txn.id, topic: "Flagging this payment", amount: txn.amount }, decision);
   if (decision.outcome === "deny") {
     const failedPayment = txn.status === "debited_not_credited" || txn.status === "pending";
     return {
@@ -1269,6 +1330,8 @@ async function flagTransaction(params: ToolParams, call: CallRecord): Promise<To
     },
   );
 
+  scheduleCheckBack(call.callRef, customer, "flag", dispute, txn);
+
   const verified = await verifyStep(call.callRef, "upi", "Re-reading the payment status", () => {
     const stored = db.getTransaction(txn.id);
     return stored?.status === "flagged" && stored.disputeId === dispute.id
@@ -1287,6 +1350,154 @@ async function flagTransaction(params: ToolParams, call: CallRecord): Promise<To
       `Done. I've flagged the ${spokenRupees(txn.amount)} payment to ${txn.counterparty.name} for investigation and raised a credit-not-received dispute, reference ${ending(dispute.id)}. ` +
       `Their bank now has to confirm the credit; if it never reached them, the money comes back to your ${customer.bank.bank} account. ` +
       `Expect an update by ${formatLongDate(dispute.expectedBy)}, and you'll get an SMS.`,
+  };
+}
+
+// ---------- Follow-ups: the case closes when the money lands, not when the call ends ----------
+
+function scheduleCheckBack(callRef: string, customer: Customer, kind: FollowUp["kind"], dispute: Dispute, txn: UpiTransaction): void {
+  const followUp = db.scheduleFollowUpOnce({
+    customerId: customer.id,
+    callRef,
+    kind,
+    disputeId: dispute.id,
+    txnId: txn.id,
+    dueAt: dispute.expectedBy,
+    note: `Confirm ${formatRupees(txn.amount)} is back in ${shortAccount(customer)} or credited to ${txn.counterparty.name}`,
+  });
+  db.recordMoment({
+    callRef,
+    kind: "action",
+    system: "helpdesk",
+    status: "ok",
+    title: `Follow-up scheduled · ${formatShortDate(followUp.dueAt)}`,
+    detail: `Closr checks back on dispute ${dispute.id}; the case closes only when the money has landed`,
+    touched: [followUp.id, dispute.id],
+    data: { followUpId: followUp.id, dueAt: followUp.dueAt },
+  });
+}
+
+/** Plays every scheduled check-back now (a demo time-skip): the bank's reversal lands and the customer is told. */
+export async function runDueFollowUps(): Promise<number> {
+  let ran = 0;
+  for (const followUp of db.listFollowUps("scheduled")) {
+    const customer = db.getCustomer(followUp.customerId);
+    const txn = db.getTransaction(followUp.txnId);
+    if (!customer || !txn) continue;
+    const reversed = db.reverseDisputedPayment(txn.id, followUp.disputeId, upiRrn());
+    if (!reversed?.reversal?.rrn) continue;
+
+    const outcome =
+      followUp.kind === "flag"
+        ? `${txn.counterparty.name}'s bank confirmed the ${formatRupees(txn.amount)} never arrived; it was reversed to ${shortAccount(customer)}`
+        : `${customer.bank.bank} reversed ${formatRupees(txn.amount)} to ${shortAccount(customer)}`;
+    db.completeFollowUp(followUp.id, outcome);
+    logTicket(
+      followUp.callRef,
+      { customerId: customer.id, relatedId: txn.id },
+      {
+        category: "upi",
+        subject: `Follow-up on ${formatRupees(txn.amount)} to ${txn.counterparty.name}`,
+        status: "resolved",
+        note: `${outcome} (reversal RRN ${reversed.reversal.rrn}). Dispute ${followUp.disputeId} closed; customer sent an SMS.`,
+      },
+    );
+    db.recordMoment({
+      callRef: followUp.callRef,
+      kind: "verified",
+      system: "upi",
+      status: "ok",
+      title: `Follow-up: ${formatRupees(txn.amount)} is back in ${shortAccount(customer)}`,
+      detail: `${outcome} · reversal RRN ${reversed.reversal.rrn} · dispute ${followUp.disputeId} closed · SMS sent`,
+      touched: [txn.id, followUp.disputeId, followUp.id],
+      data: { followUpId: followUp.id, txnId: txn.id, amount: txn.amount, rrn: reversed.reversal.rrn, smsSent: true },
+    });
+    ran += 1;
+  }
+  return ran;
+}
+
+// ---------- Sales: one relevant offer after a fix ----------
+
+function offerContext(call: CallRecord) {
+  const moments = db.listMoments(call.callRef);
+  return {
+    resolvedThisCall: moments.some((moment) => moment.kind === "verified" && moment.status === "ok" && moment.system !== "sales"),
+    offersSentThisCall: moments.filter((moment) => moment.system === "sales" && moment.kind === "action" && moment.status === "ok").length,
+  };
+}
+
+async function checkOffers(params: ToolParams, call: CallRecord): Promise<ToolResult> {
+  const caller = requireCaller(call, "sales");
+  if (!caller.ok) return caller.result;
+  const customer = caller.value;
+  const context = offerContext(call);
+  const eligible = db.listOffers(customer.id).filter((offer) => offer.status === "eligible");
+  const offer = eligible.find((candidate) => !candidate.regulated) ?? eligible[0];
+  if (!offer || !context.resolvedThisCall || context.offersSentThisCall > 0) {
+    return { ok: true, offer: null, say: "There is nothing to offer right now; just close the conversation warmly." };
+  }
+  db.recordMoment({
+    callRef: call.callRef,
+    kind: "lookup",
+    system: "sales",
+    status: "ok",
+    title: `Relevant offer: ${offer.product}`,
+    detail: offer.why,
+    touched: [offer.id],
+    data: { offerId: offer.id, product: offer.product, pitch: offer.pitch, regulated: offer.regulated },
+  });
+  return {
+    ok: true,
+    offer: { offer_id: offer.id, product: offer.product, pitch: offer.pitch, regulated: offer.regulated },
+    say: `Mention it in one sentence and only send it if they want it: ${offer.pitch}.`,
+  };
+}
+
+// Nothing is enrolled or charged in the conversation: the offer lands in the app, where the customer reads the terms
+// (and, for loans, the Key Fact Statement) and decides.
+async function sendOffer(params: ToolParams, call: CallRecord): Promise<ToolResult> {
+  const caller = requireCaller(call, "sales");
+  if (!caller.ok) return caller.result;
+  const customer = caller.value;
+  const ref = readText(params, "offer_id");
+  const offer = db.listOffers(customer.id).find((candidate) => candidate.id === ref);
+  if (!offer) return { ok: false, say: "I couldn't find that offer on your account." };
+
+  const decision = evaluateOffer(offer, customer, offerContext(call));
+  await showPolicy(call, { id: offer.id, topic: "Product offer", amount: 0 }, decision);
+  if (decision.outcome !== "allow") {
+    return { ok: false, status: "not_sent", reasons: decision.reasons, say: "Let's leave that for now." };
+  }
+
+  const momentId = await startStep(call.callRef, {
+    kind: "action",
+    system: "sales",
+    title: `Sending ${offer.product} to the Paytm app`,
+    detail: offer.regulated ? "With the Key Fact Statement; consent only in the app" : "Customer accepts in the app; nothing charged now",
+    data: { offerId: offer.id },
+  });
+  const sent = db.updateOffer(offer.id, { status: "sent", sentAt: new Date().toISOString(), callRef: call.callRef });
+  db.updateMoment(momentId, {
+    status: "ok",
+    title: `Offer sent · ${offer.product}`,
+    detail: `${offer.pitch}${offer.regulated ? " · Key Fact Statement attached" : ""} · awaiting the customer's choice in the app`,
+    touched: [offer.id],
+    data: { offerId: offer.id, product: offer.product, regulated: offer.regulated },
+  });
+  const verified = await verifyStep(call.callRef, "sales", "Checking the offer reached the app", () =>
+    db.listOffers(customer.id).find((candidate) => candidate.id === offer.id)?.status === "sent"
+      ? { passed: true, title: "Offer is in the customer's Paytm app", detail: `${offer.id} · sent`, touched: [offer.id] }
+      : { passed: false, title: "Offer didn't reach the app", detail: offer.id },
+  );
+  return {
+    ok: Boolean(sent),
+    status: "sent",
+    offer_id: offer.id,
+    verified,
+    say:
+      `I've sent the ${offer.product} details to your Paytm app. Nothing is charged or started now; you can read everything there and accept only if you want it.` +
+      (offer.regulated ? " The Key Fact Statement with the full cost is attached." : ""),
   };
 }
 
@@ -2840,6 +3051,8 @@ const TOOLS = {
   check_rent: checkRent,
   refund_rent: refundRent,
   flag_transaction: flagTransaction,
+  check_offers: checkOffers,
+  send_offer: sendOffer,
   search_web: searchTheWeb,
   verify_claim: verifyClaim,
   escalate,

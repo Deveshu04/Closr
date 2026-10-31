@@ -1,8 +1,9 @@
-import type { ProfileKind } from "@/lib/types";
+import type { AutonomyLevel, Lesson, ProfileKind, Workflow } from "@/lib/types";
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
 
-async function post<T extends object>(
+async function send<T extends object>(
+  method: "POST" | "DELETE",
   url: string,
   body: unknown,
   fallbackError: string,
@@ -12,9 +13,9 @@ async function post<T extends object>(
   const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
   try {
     const res = await fetch(url, {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body ?? {}),
+      body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
       cache: "no-store",
       signal: controller.signal,
     });
@@ -30,6 +31,10 @@ async function post<T extends object>(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function post<T extends object>(url: string, body: unknown, fallbackError: string, timeoutMs?: number): Promise<Result<T>> {
+  return send("POST", url, body, fallbackError, timeoutMs);
 }
 
 export function startCall(phone: string, profile: ProfileKind): Promise<Result<{ callRef?: string }>> {
@@ -81,6 +86,23 @@ export function decideApproval(id: string, decision: "approved" | "denied"): Pro
 /** Served as a text/plain attachment: call details, the conversation and every action Closr took. */
 export function transcriptUrl(callRef: string): string {
   return `/api/calls/${encodeURIComponent(callRef)}/transcript`;
+}
+
+export function setAutonomy(workflow: Workflow, level: AutonomyLevel): Promise<Result> {
+  return post("/api/autonomy", { workflow, level }, "Couldn't change the trust dial", 10_000);
+}
+
+export function addLesson(text: string, sourceCallRef: string | undefined): Promise<Result<{ lesson: Lesson }>> {
+  return post("/api/lessons", { text, sourceCallRef }, "Couldn't save the coaching", 10_000);
+}
+
+export function deleteLesson(id: string): Promise<Result> {
+  return send("DELETE", `/api/lessons/${encodeURIComponent(id)}`, undefined, "Couldn't remove the lesson", 10_000);
+}
+
+/** Demo time-skip: plays every scheduled check-back now. */
+export function runFollowUps(): Promise<Result<{ ran?: number }>> {
+  return post("/api/followups/run", {}, "Couldn't run the follow-ups", 30_000);
 }
 
 /** Puts every record back to its seeded state; call history and transcripts survive unless `clearHistory`. */

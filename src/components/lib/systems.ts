@@ -1,6 +1,7 @@
 import {
   ArrowLeftRight,
   Banknote,
+  CalendarClock,
   Gift,
   Globe,
   HandCoins,
@@ -12,6 +13,7 @@ import {
   Scale,
   ScrollText,
   Speaker,
+  Tag,
   UserRound,
 } from "lucide-react";
 import type { ConsoleState, Moment, ProfileKind, SystemName } from "@/lib/types";
@@ -26,6 +28,7 @@ export const SYSTEMS: Record<SystemName, { label: string; icon: LucideIcon }> = 
   rewards: { label: "Rewards", icon: Gift },
   lending: { label: "Lending", icon: HandCoins },
   payouts: { label: "Payouts", icon: Banknote },
+  sales: { label: "Sales", icon: Tag },
   helpdesk: { label: "Helpdesk", icon: LifeBuoy },
   policy: { label: "Policy", icon: ScrollText },
   web: { label: "Official sources", icon: Globe },
@@ -38,6 +41,7 @@ export function systemOf(name: string | undefined): { label: string; icon: Lucid
 export type TabId =
   | "upi"
   | "disputes"
+  | "followups"
   | "rewards"
   | "loans"
   | "collections"
@@ -45,11 +49,13 @@ export type TabId =
   | "devices"
   | "rental"
   | "payouts"
+  | "offers"
   | "helpdesk";
 
 export const TABS: Record<TabId, { label: string; icon: LucideIcon }> = {
   upi: { label: "UPI", icon: ArrowLeftRight },
   disputes: { label: "Disputes", icon: Scale },
+  followups: { label: "Follow-ups", icon: CalendarClock },
   rewards: { label: "Cashback", icon: Gift },
   loans: { label: "Loans", icon: HandCoins },
   collections: { label: "Collections", icon: QrCode },
@@ -57,22 +63,24 @@ export const TABS: Record<TabId, { label: string; icon: LucideIcon }> = {
   devices: { label: "Soundbox", icon: Speaker },
   rental: { label: "Rental", icon: Receipt },
   payouts: { label: "Payouts", icon: Banknote },
+  offers: { label: "Offers", icon: Tag },
   helpdesk: { label: "Helpdesk", icon: LifeBuoy },
 };
 
 export const PROFILE_TABS: Record<ProfileKind, TabId[]> = {
-  consumer: ["upi", "disputes", "rewards", "loans", "payouts", "helpdesk"],
-  merchant: ["collections", "settlements", "devices", "rental", "payouts", "helpdesk"],
+  consumer: ["upi", "disputes", "followups", "rewards", "loans", "payouts", "offers", "helpdesk"],
+  merchant: ["collections", "settlements", "devices", "rental", "payouts", "offers", "helpdesk"],
 };
 
 const SYSTEM_TAB: Record<ProfileKind, Partial<Record<SystemName, TabId>>> = {
-  consumer: { upi: "upi", rewards: "rewards", lending: "loans", payouts: "payouts", helpdesk: "helpdesk" },
+  consumer: { upi: "upi", rewards: "rewards", lending: "loans", payouts: "payouts", sales: "offers", helpdesk: "helpdesk" },
   merchant: {
     upi: "collections",
     settlements: "settlements",
     devices: "devices",
     billing: "rental",
     payouts: "payouts",
+    sales: "offers",
     helpdesk: "helpdesk",
   },
 };
@@ -97,6 +105,10 @@ function tabOfRecord(hit: RecordHit, kindOf: (customerId: string) => ProfileKind
       return "payouts";
     case "ticket":
       return "helpdesk";
+    case "offer":
+      return "offers";
+    case "followUp":
+      return "followups";
     case "customer":
       return null;
   }

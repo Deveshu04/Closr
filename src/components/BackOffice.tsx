@@ -1,15 +1,29 @@
 "use client";
 
-import { Database, History } from "lucide-react";
+import { BookOpenCheck, Database, History } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ConsoleState, ProfileKind } from "@/lib/types";
 import { CallHistory } from "./backoffice/CallHistory";
+import { FollowUpRunner } from "./backoffice/FollowUpRunner";
+import { Playbook } from "./backoffice/Playbook";
 import { buildTables } from "./backoffice/tables";
 import { type Pulses, type TabFocus } from "./hooks/useActivity";
 import { useNow } from "./hooks/useNow";
 import { PROFILE_TABS, TABS, type TabId } from "./lib/systems";
 
-type View = "records" | "history";
+type View = "records" | "history" | "playbook";
+
+const VIEWS = [
+  { id: "records", label: "Records", icon: Database },
+  { id: "history", label: "Call history", icon: History },
+  { id: "playbook", label: "Playbook", icon: BookOpenCheck },
+] as const;
+
+const HEADING: Record<View, { title: string; sub?: string }> = {
+  records: { title: "Back office" },
+  history: { title: "Call history", sub: "For quality review and internal training" },
+  playbook: { title: "Playbook", sub: "Specialists' coaching · applied to every later call and chat" },
+};
 
 interface Props {
   state: ConsoleState;
@@ -18,10 +32,11 @@ interface Props {
   callerLabel: string;
   pulses: Pulses;
   focus: TabFocus | null;
+  refresh: () => void;
   className?: string;
 }
 
-export function BackOffice({ state, profile, callerId, callerLabel, pulses, focus, className = "" }: Props) {
+export function BackOffice({ state, profile, callerId, callerLabel, pulses, focus, refresh, className = "" }: Props) {
   const [view, setView] = useState<View>("records");
   const [chosen, setChosen] = useState<TabId>(PROFILE_TABS[profile][0]);
   const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({});
@@ -59,21 +74,14 @@ export function BackOffice({ state, profile, callerId, callerLabel, pulses, focu
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
           <div className="min-w-0">
             <h2 id="backoffice-heading" className="font-serif text-[1.625rem] font-semibold leading-tight text-navy">
-              {view === "records" ? "Back office" : "Call history"}
+              {HEADING[view].title}
             </h2>
             <p className="mt-0.5 text-[14px] text-muted">
-              {view === "records"
-                ? `${profile === "merchant" ? "Merchant" : "Consumer"} systems · records change as Closr acts`
-                : "For quality review and internal training"}
+              {HEADING[view].sub ?? `${profile === "merchant" ? "Merchant" : "Consumer"} systems · records change as Closr acts`}
             </p>
           </div>
           <div role="group" aria-label="Back office view" className="flex shrink-0 rounded-lg bg-paper p-0.5 ring-1 ring-rule">
-            {(
-              [
-                { id: "records", label: "Records", icon: Database },
-                { id: "history", label: "Call history", icon: History },
-              ] as const
-            ).map(({ id, label, icon: Icon }) => (
+            {VIEWS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 type="button"
@@ -85,6 +93,11 @@ export function BackOffice({ state, profile, callerId, callerLabel, pulses, focu
               >
                 <Icon aria-hidden size={14} strokeWidth={2.25} />
                 {label}
+                {id === "playbook" && state.lessons.length > 0 && (
+                  <span className="figures rounded-full bg-sky-wash px-1.5 text-[11.5px] leading-[1.125rem] text-navy">
+                    {state.lessons.length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -142,11 +155,18 @@ export function BackOffice({ state, profile, callerId, callerLabel, pulses, focu
           className="scrollbar-quiet @container overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
         >
           {current.notice && <div className="border-b border-amber-bright/30 bg-amber-wash/60 px-5 py-2.5">{current.notice}</div>}
+          {active === "followups" && (
+            <FollowUpRunner scheduled={state.followUps.filter((f) => f.status === "scheduled").length} onRan={refresh} />
+          )}
           {current.render()}
         </div>
       ) : (
         <div className="scrollbar-quiet @container overflow-x-auto lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
-          <CallHistory trigger={`${call?.callRef ?? ""}:${call?.status ?? ""}`} currentCallRef={call?.callRef} now={now} />
+          {view === "history" ? (
+            <CallHistory trigger={`${call?.callRef ?? ""}:${call?.status ?? ""}`} currentCallRef={call?.callRef} now={now} />
+          ) : (
+            <Playbook lessons={state.lessons} onChanged={refresh} />
+          )}
         </div>
       )}
     </section>

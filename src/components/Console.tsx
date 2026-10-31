@@ -14,6 +14,7 @@ import { useConsoleState } from "./hooks/useConsoleState";
 import { chronological } from "./lib/moments";
 import { channelOf, demoCustomer } from "./lib/records";
 import { MomentsTimeline } from "./MomentsTimeline";
+import { OutcomesStrip } from "./OutcomesStrip";
 
 const POLL_MS = 700;
 const PROFILE_KEY = "closr.consoleProfile";
@@ -82,6 +83,7 @@ export function Console() {
     <MotionConfig reducedMotion="user">
       <div className="flex min-h-dvh flex-col lg:h-dvh">
         <Header reachable={reachable} onReset={refresh} />
+        <OutcomesStrip trigger={`${call?.callRef ?? ""}:${call?.status ?? ""}`} />
         <main className="grid flex-1 grid-cols-1 lg:min-h-0 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:grid-rows-[auto_minmax(0,1fr)] xl:grid-cols-[16.5rem_minmax(0,1.1fr)_minmax(0,1fr)] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[19.5rem_minmax(0,1.05fr)_minmax(0,1fr)]">
           <CallPanel
             call={call}
@@ -91,10 +93,11 @@ export function Console() {
             customer={customer}
             customerRole={role}
             customerPulse={customerPulse}
+            autonomy={state.autonomy}
             refresh={refresh}
             className="lg:col-span-2 xl:col-span-1"
           />
-          <MomentsTimeline moments={moments} call={call} customer={callCustomer} controls={controls} />
+          <MomentsTimeline moments={moments} call={call} customer={callCustomer} controls={controls} onCoached={refresh} />
           <BackOffice
             state={state}
             profile={profile}
@@ -102,6 +105,7 @@ export function Console() {
             callerLabel={callerLabel}
             pulses={pulses}
             focus={focus}
+            refresh={refresh}
           />
         </main>
         <ApprovalToast controls={controls} />

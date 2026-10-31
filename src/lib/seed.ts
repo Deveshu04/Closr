@@ -2,6 +2,7 @@ import { atIst, istDateKey, monthKey, normalizePhone, shiftDateKey, shiftMonthKe
 import { payoutKey, stableDigits, upiRrn } from "@/lib/ids";
 import { reversalDeadline, udirExpectedBy } from "@/lib/policy";
 import type {
+  Offer,
   Customer,
   Device,
   Dispute,
@@ -34,6 +35,7 @@ export interface SeedData {
   loans: Loan[];
   payouts: Payout[];
   tickets: Ticket[];
+  offers: Offer[];
 }
 
 export const DEMO_CONSUMER_ID = "CUST-1001";
@@ -762,11 +764,41 @@ export function createSeed(now: Date = new Date()): SeedData {
     loans: [],
     payouts: [],
     tickets: [],
+    offers: [],
   };
   const clock = seedClock(now);
   // The demo profiles come first, so a number shared with a back-office record still resolves to the demo.
   seedConsumerDemo(seed, clock);
   seedMerchantDemo(seed, clock);
   seedBackOffice(seed, clock);
+  seed.offers.push(
+    {
+      id: "OFR-UPILITE-1001",
+      customerId: DEMO_CONSUMER_ID,
+      product: "UPI Lite",
+      pitch: "Small payments up to ₹1,000 go through instantly from a Paytm balance, without waiting on the bank's servers, so they fail far less often",
+      why: "Recent small UPI payments failed or got stuck at the bank",
+      regulated: false,
+      status: "eligible",
+    },
+    {
+      id: "OFR-SB5DS-2001",
+      customerId: DEMO_MERCHANT_ID,
+      product: "Soundbox 5.0 Dual-SIM swap",
+      pitch: "A Soundbox with two SIMs that switches network when one is weak, swapped at no extra rent",
+      why: "The Soundbox went silent on a weak Airtel signal",
+      regulated: false,
+      status: "eligible",
+    },
+    {
+      id: "OFR-MLTOP-2001",
+      customerId: DEMO_MERCHANT_ID,
+      product: "Merchant loan top-up, ₹75,000 pre-approved",
+      pitch: "A pre-approved ₹75,000 top-up on the existing loan, repaid from daily settlements",
+      why: "Steady daily collections and on-time repayments on the current loan",
+      regulated: true,
+      status: "eligible",
+    },
+  );
   return seed;
 }

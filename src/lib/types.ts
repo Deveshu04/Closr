@@ -7,6 +7,7 @@ export type SystemName =
   | "rewards"
   | "lending"
   | "payouts"
+  | "sales"
   | "helpdesk"
   | "policy"
   | "web";
@@ -239,6 +240,66 @@ export interface CallRecord {
   summary?: string;
 }
 
+/** A product Closr may offer once the customer's issue is resolved; the customer accepts only in the app. */
+export interface Offer {
+  id: string;
+  customerId: string;
+  product: string;
+  /** The one-line benefit, tied to the problem the customer just had. */
+  pitch: string;
+  /** Why it fits this customer, for the care team. */
+  why: string;
+  /** Lending products: a Key Fact Statement goes with the offer and consent is taken in the app. */
+  regulated: boolean;
+  status: "eligible" | "sent" | "accepted" | "declined";
+  sentAt?: string;
+  callRef?: string;
+}
+
+/** A check-back Closr schedules so a case is closed only once the money has actually landed. */
+export interface FollowUp {
+  id: string;
+  customerId: string;
+  callRef: string;
+  kind: "dispute" | "flag";
+  disputeId: string;
+  txnId: string;
+  dueAt: string;
+  status: "scheduled" | "done";
+  note: string;
+  outcome?: string;
+  doneAt?: string;
+}
+
+/** Workflows that move money, each with its own autonomy level on the trust dial. */
+export type Workflow = "cashback" | "rent_refunds" | "settlement_retries";
+
+/** 0 Shadow: suggests only · 1 Approve: a person approves every payout · 2 Auto within limits · 3 Autonomous (locked). */
+export type AutonomyLevel = 0 | 1 | 2 | 3;
+
+/** A specialist's "next time, do X", fed into every later call and chat. */
+export interface Lesson {
+  id: string;
+  text: string;
+  createdAt: string;
+  sourceCallRef?: string;
+}
+
+/** Outcome numbers for the care team, served by GET /api/metrics. */
+export interface OutcomeMetrics {
+  conversations: number;
+  /** Ended with a verified action and no human escalation. */
+  resolvedAutonomously: number;
+  /** At least one action re-read from the source system. */
+  verifiedResolutions: number;
+  escalations: number;
+  approvals: { requested: number; approved: number; denied: number };
+  moneyReturned: number;
+  disputesRaised: number;
+  avgResolutionSec: number | null;
+  autonomousRate: number | null;
+}
+
 export interface PolicyDecision {
   outcome: "allow" | "needs_approval" | "deny";
   reasons: string[];
@@ -260,4 +321,8 @@ export interface ConsoleState {
   loans: Loan[];
   payouts: Payout[];
   tickets: Ticket[];
+  autonomy: Record<Workflow, AutonomyLevel>;
+  lessons: Lesson[];
+  offers: Offer[];
+  followUps: FollowUp[];
 }

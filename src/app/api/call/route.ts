@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { placeCall } from "@/lib/bolna";
 import { claimDemoCustomer, createCall, getActiveCall, getState, recordMoment, updateCall } from "@/lib/db";
+import { lessonsForPrompt } from "@/lib/lessons";
 import type { Customer, ProfileKind } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ export async function POST(req: Request) {
       customer_type: customer?.kind ?? profile,
       business_name: customer?.business?.name ?? "",
       greeting: greetingFor(customer),
+      lessons: lessonsForPrompt(),
     });
     updateCall(call.callRef, { bolnaExecutionId: executionId, status: "ringing" });
     recordMoment({

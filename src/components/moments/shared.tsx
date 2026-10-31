@@ -11,7 +11,7 @@ import {
   ScrollText,
   Stamp,
 } from "lucide-react";
-import type { MomentKind, MomentStatus } from "@/lib/types";
+import type { Moment, MomentKind, MomentStatus } from "@/lib/types";
 import type { Field } from "../lib/data";
 
 export const KIND_META: Record<MomentKind, { label: string; icon: LucideIcon; hint: string }> = {
@@ -25,6 +25,11 @@ export const KIND_META: Record<MomentKind, { label: string; icon: LucideIcon; hi
   search: { label: "Claim check", icon: BookCheck, hint: "A rule the customer cited, checked against RBI and NPCI" },
   escalated: { label: "Handoff", icon: Headset, hint: "Passed to a human specialist with a written brief" },
 };
+
+/** Trust dial L0: an escalation that carries Closr's suggested fix for a specialist to complete. */
+export function isShadow(moment: Moment): boolean {
+  return moment.kind === "escalated" && moment.data?.shadow === true;
+}
 
 export function isTrouble(status: MomentStatus): boolean {
   return status === "blocked" || status === "failed";

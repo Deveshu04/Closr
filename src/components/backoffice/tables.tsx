@@ -4,6 +4,7 @@ import {
   BatteryLow,
   BatteryMedium,
   BatteryFull,
+  FileText,
   Signal,
   SignalLow,
   SignalZero,
@@ -16,7 +17,9 @@ import type {
   Customer,
   Device,
   Dispute,
+  FollowUp,
   Loan,
+  Offer,
   Payout,
   RentalCharge,
   Reward,
@@ -587,6 +590,68 @@ export function buildTables(state: ConsoleState, ctx: Context): Record<TabId, Ta
     },
   ];
 
+  const followUpColumns: Column<FollowUp>[] = [
+    {
+      header: "Due",
+      cell: (f) => (
+        <IdCell id={weekdayDate(f.dueAt)} sub={f.doneAt ? `Checked ${shortDateTime(f.doneAt)}` : humanize(f.kind)} />
+      ),
+    },
+    {
+      header: "Checking",
+      cell: (f) => (
+        <div className="max-w-[15rem]">
+          <p className="line-clamp-2 text-[13px] text-ink">{f.note}</p>
+          <p className="figures mt-0.5 whitespace-nowrap text-xs text-muted">Dispute {lastFour(f.disputeId)}</p>
+        </div>
+      ),
+    },
+    { header: "Status", cell: (f) => <StatusPill value={f.status} /> },
+    {
+      header: "Outcome",
+      cell: (f) =>
+        f.outcome ? <p className="line-clamp-3 max-w-[14rem] text-[13px] font-medium text-leaf">{f.outcome}</p> : dash,
+    },
+  ];
+
+  const offerColumns: Column<Offer>[] = [
+    {
+      header: "Offer",
+      cell: (o) => (
+        <Primary title={o.product} sub={o.sentAt ? `Sent ${shortDateTime(o.sentAt)}` : o.id} width="max-w-[11rem]" />
+      ),
+    },
+    {
+      header: "Pitch · why it fits",
+      cell: (o) => (
+        <div className="max-w-[16rem]">
+          <p className="line-clamp-2 text-[13px] text-ink">{o.pitch}</p>
+          <p title={o.why} className="mt-0.5 line-clamp-2 text-xs text-muted">
+            {o.why}
+          </p>
+        </div>
+      ),
+    },
+    {
+      header: "Status",
+      cell: (o) => (
+        <div className="flex flex-col items-start gap-1">
+          <StatusPill value={o.status} />
+          {o.regulated && (
+            <span
+              title="Lending product: the Key Fact Statement goes with the offer and consent is taken only in the app"
+              className="inline-flex cursor-help items-center gap-1 whitespace-nowrap rounded-full bg-paper px-2 py-0.5 text-[12px] font-semibold text-navy ring-1 ring-inset ring-rule"
+            >
+              <FileText aria-hidden size={12} strokeWidth={2.25} />
+              KFS attached
+            </span>
+          )}
+        </div>
+      ),
+    },
+    customerColumn<Offer>(),
+  ];
+
   const ticketColumns: Column<Ticket>[] = [
     { header: "Ticket", cell: (t) => <IdCell id={t.id} sub={humanize(t.category)} /> },
     {
@@ -667,6 +732,18 @@ export function buildTables(state: ConsoleState, ctx: Context): Record<TabId, Ta
       },
       ctx,
     ),
+    followups: table(
+      "followups",
+      {
+        rows: newestFirst(state.followUps, (f) => f.dueAt),
+        columns: followUpColumns,
+        rowKey: (f) => f.id,
+        matchIds: (f) => [f.id],
+        empty: "No follow-ups. When Closr raises a dispute, it schedules a check-back so the case closes only once the money lands.",
+        minWidth: "30rem",
+      },
+      ctx,
+    ),
     rewards: table(
       "rewards",
       {
@@ -735,6 +812,19 @@ export function buildTables(state: ConsoleState, ctx: Context): Record<TabId, Ta
         rowKey: (p) => p.id,
         matchIds: (p) => [p.id],
         empty: "No payouts yet. Cashback, rent refunds and settlement retries Closr sends appear here.",
+        minWidth: "30rem",
+      },
+      ctx,
+    ),
+    offers: table(
+      "offers",
+      {
+        // Offers already sent come first: they are the ones a customer may ask about.
+        rows: newestFirst(state.offers, (o) => o.sentAt),
+        columns: offerColumns,
+        rowKey: (o) => o.id,
+        matchIds: (o) => [o.id],
+        empty: "No offers. After a fix, Closr may send one relevant offer to the customer's app.",
         minWidth: "30rem",
       },
       ctx,

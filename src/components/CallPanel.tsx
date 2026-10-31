@@ -18,7 +18,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { useId } from "react";
-import type { CallRecord, Customer, ProfileKind } from "@/lib/types";
+import type { AutonomyLevel, CallRecord, Customer, ProfileKind, Workflow } from "@/lib/types";
 import { ChannelBadge } from "./ChannelBadge";
 import { type CallPhase, useCallRequest } from "./hooks/useCallRequest";
 import { duration, humanize, lastFour } from "./lib/format";
@@ -64,6 +64,7 @@ interface Props {
   customerRole: "live" | "last" | "demo";
   /** Set while the caller's CRM record is being touched, to flash the caller block. */
   customerPulse: number | undefined;
+  autonomy: Record<Workflow, AutonomyLevel>;
   refresh: () => void;
   className?: string;
 }
@@ -220,6 +221,7 @@ export function CallPanel({
   customer,
   customerRole,
   customerPulse,
+  autonomy,
   refresh,
   className = "",
 }: Props) {
@@ -338,7 +340,7 @@ export function CallPanel({
       </section>
 
       <section aria-label="Trust level" className={`${SECTION} lg:w-64 lg:shrink-0 xl:w-auto`}>
-        <TrustDial />
+        <TrustDial autonomy={autonomy} refresh={refresh} />
       </section>
     </aside>
   );

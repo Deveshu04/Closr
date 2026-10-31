@@ -14,7 +14,7 @@ import {
   shiftDateKey,
 } from "@/lib/format";
 import type { DeviceRecord } from "@/lib/seed";
-import type { Customer, Loan, PolicyDecision, RentalCharge, Reward, Settlement, UpiTransaction } from "@/lib/types";
+import type { Customer, Loan, Offer, PolicyDecision, RentalCharge, Reward, Settlement, UpiTransaction } from "@/lib/types";
 
 export const ESCALATION_CALLBACK_HOURS = 2;
 
@@ -108,6 +108,25 @@ export function reversalDaysLate(txn: UpiTransaction, now: Date = new Date()): n
 
 export function bankCompensationDue(txn: UpiTransaction, now: Date = new Date()): number {
   return reversalDaysLate(txn, now) * UPI_DELAY_COMPENSATION_PER_DAY;
+}
+
+/** Selling only follows a fixed problem: one offer per conversation, never before the issue is verified resolved. */
+export function evaluateOffer(
+  offer: Offer,
+  customer: Customer,
+  context: { resolvedThisCall: boolean; offersSentThisCall: number },
+): PolicyDecision {
+  const resolved = rule("The customer's issue is resolved and verified first");
+  const once = rule("At most one offer per conversation");
+  const consent = rule("Customer hasn't opted out of offers");
+  const open = rule("Offer not already sent");
+  const results: RuleResult[] = [
+    context.resolvedThisCall ? resolved.pass("A verified fix landed in this conversation") : resolved.fail("Nothing resolved yet, so no selling"),
+    context.offersSentThisCall === 0 ? once.pass("No offer made yet") : once.fail("One offer was already made in this conversation"),
+    customer.flags.includes("no_marketing") ? consent.fail("Opted out of marketing") : consent.pass("No opt-out on file"),
+    offer.status === "eligible" ? open.pass(offer.regulated ? "Key Fact Statement goes with it; consent only in the app" : "Accepted only in the app") : open.fail(`Already ${offer.status}`),
+  ];
+  return decide(results, [`${offer.product} can be offered`]);
 }
 
 export const FLAG_WINDOW_DAYS = 30;

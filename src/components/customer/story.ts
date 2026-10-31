@@ -3,6 +3,7 @@ import {
   AudioLines,
   BadgeCheck,
   BookCheck,
+  CalendarClock,
   CircleAlert,
   Flag,
   Gift,
@@ -18,6 +19,7 @@ import {
   ShieldCheck,
   Speaker,
   Store,
+  Tag,
   UserRound,
   UserRoundCheck,
   Volume2,
@@ -33,6 +35,7 @@ import type {
   Payout,
   ProfileKind,
   SystemName,
+  Workflow,
 } from "@/lib/types";
 import { approvalForMoment } from "../hooks/useApprovals";
 import { type Source, type Verdict, readSources, readVerdict } from "../lib/claims";
@@ -172,9 +175,14 @@ type Intent =
   | "bank_link"
   | "billing_stop"
   | "grievance"
+  | "offer"
+  | "follow_up"
   | "ticket";
 
 function intentOf(moment: Moment, hits: RecordHit[]): Intent | null {
+  if (moment.system === "sales") return "offer";
+  // A check-back touches its dispute too; it is the promise to come back, not a second dispute.
+  if (pickString(moment.data, "followUpId")) return "follow_up";
   const words = wording(moment);
   const payout = hitOf(hits, "payout")?.record;
   if (payout) return payout.kind;
@@ -216,6 +224,8 @@ const INTENT_META: Record<Intent, { icon: LucideIcon; doing: string; failed: str
   bank_link: { icon: Landmark, doing: "Sending you a secure link…", failed: "Couldn't send the link" },
   billing_stop: { icon: Receipt, doing: "Stopping rent on your returned Soundbox…", failed: "Couldn't stop the rent" },
   grievance: { icon: HandCoins, doing: "Sending your complaint to the lender…", failed: "Couldn't send the complaint" },
+  offer: { icon: Tag, doing: "Sending the details to your app…", failed: "Couldn't send the details" },
+  follow_up: { icon: CalendarClock, doing: "Scheduling a check-back…", failed: "Couldn't schedule a check-back" },
   ticket: { icon: LifeBuoy, doing: "Opening a request for our team…", failed: "Couldn't open a request" },
 };
 
@@ -375,6 +385,24 @@ function describeAction(moment: Moment, records: CallerRecords): Line | null {
         detail: compact([refTail(ticket?.id), "their grievance officer will contact you"]),
       };
     }
+    case "offer": {
+      const offer = hitOf(hits, "offer")?.record;
+      const product = offer?.product ?? pickString(moment.data, "product");
+      const regulated = offer?.regulated ?? moment.data?.regulated === true;
+      return {
+        icon: Tag,
+        text: product ? `We've sent ${product} details to your app` : "We've sent the details to your app",
+        note: `Nothing is charged — accept only if you want it.${regulated ? " The Key Fact Statement with the full cost is attached." : ""}`,
+      };
+    }
+    case "follow_up": {
+      const dueAt = hitOf(hits, "followUp")?.record.dueAt ?? pickString(moment.data, "dueAt");
+      return {
+        icon: CalendarClock,
+        text: dueAt ? `We'll check back by ${weekdayDate(dueAt)}` : "We'll check back on this for you",
+        detail: "Your case stays open until the money is back",
+      };
+    }
     case "ticket":
       // Ticket bookkeeping rides along with every fix; the requests are listed once, after the call.
       return null;
@@ -386,6 +414,8 @@ function describeLookup(moment: Moment, records: CallerRecords): Line | null {
   const hits = touchedRecords(records, moment.touched);
   const merchant = records.kind === "merchant";
   const system: SystemName | undefined = moment.system;
+  // Matching an offer is Closr's own housekeeping; the customer only hears about an offer once it is sent.
+  if (system === "sales") return null;
 
   if (tone === "problem") {
     // A failed lookup elsewhere is usually Closr asking which record was meant; the call carries on.
@@ -514,6 +544,36 @@ function callbackLine(moment: Moment, channel: Channel): Line {
   };
 }
 
+/** A check-back that ran after the conversation: the money is back and the customer was told by SMS. */
+function checkBackLine(moment: Moment, records: CallerRecords): Line {
+  const amount = pickNumber(moment.data, "amount");
+  return {
+    icon: RotateCcw,
+    text: `We checked back: ${amount === undefined ? "your money" : inr(amount)} is back in ${bankOf(records)}`,
+    note: moment.data?.smsSent === true ? "We've sent you an SMS." : undefined,
+  };
+}
+
+const WORKFLOW_WORD: Record<Workflow, string> = {
+  cashback: "cashback",
+  rent_refunds: "rent refund",
+  settlement_retries: "settlement",
+};
+
+/** In shadow mode Closr has worked out the fix and a specialist makes it, so the promise is completion, not a call back. */
+function handoffLine(moment: Moment, channel: Channel): Line {
+  if (moment.data?.shadow !== true) return callbackLine(moment, channel);
+  const amount = pickNumber(moment.data, "amount");
+  const workflow = pickString(moment.data, "workflow");
+  const word = workflow && Object.hasOwn(WORKFLOW_WORD, workflow) ? WORKFLOW_WORD[workflow as Workflow] : undefined;
+  return {
+    icon: UserRoundCheck,
+    text: "A Paytm specialist will complete this for you shortly",
+    detail: compact([amount !== undefined && word && `Your ${inr(amount)} ${word}`, refTail(pickString(moment.data, "ticketId"))]),
+    note: "You'll get an SMS when it's done.",
+  };
+}
+
 /** Policy topics are internal tool wording; say what they are about instead. */
 function topicPhrase(topic: string): string {
   if (/flag|credit.not.received|never (arrived|received)/i.test(topic)) return "payments that didn't arrive";
@@ -540,6 +600,9 @@ function describe(moment: Moment, records: CallerRecords): Line | null {
     case "lookup":
       return describeLookup(moment, records);
     case "policy": {
+      const subjectId = pickString(moment.data, "subjectId");
+      // The rules Closr checks before sending an offer protect the customer but aren't theirs to read through.
+      if (subjectId && records.offers.some((o) => o.id === subjectId)) return null;
       const topic = pickString(moment.data, "topic");
       const subject = topic ? `the rules for ${topicPhrase(topic)}` : "what we can do";
       if (tone === "progress") return { icon: ShieldCheck, text: `Checking ${subject}…` };
@@ -565,6 +628,8 @@ function describe(moment: Moment, records: CallerRecords): Line | null {
       if (moment.data?.duplicate === true) {
         return { icon: BadgeCheck, text: "Already done earlier, so nothing was paid twice", minor: true };
       }
+      if (moment.system === "sales") return { icon: BadgeCheck, text: "It's waiting in your Paytm app", minor: true };
+      if (pickString(moment.data, "followUpId")) return checkBackLine(moment, records);
       return { icon: BadgeCheck, text: `Confirmed with ${where}`, minor: true };
     }
     case "approval": {
@@ -594,7 +659,7 @@ function describe(moment: Moment, records: CallerRecords): Line | null {
       return { icon: BookCheck, text: `Looked up: ${query}` };
     }
     case "escalated":
-      return callbackLine(moment, records.channel);
+      return handoffLine(moment, records.channel);
     default:
       return null;
   }
@@ -623,9 +688,18 @@ function feedTone(moment: Moment): Tone {
 /** The call's moments, retold for the customer. Internal detail (rules, flags, briefs, other customers) never appears. */
 export function customerFeed(moments: Moment[], records: CallerRecords): Step[] {
   const steps: Step[] = [];
+  // In shadow mode the rules allow the fix but a specialist makes it, so the policy line mustn't promise Closr will.
+  const shadowed = new Set(
+    moments.flatMap((m) => (m.kind === "escalated" && m.data?.shadow === true ? [pickString(m.data, "subjectId")] : [])),
+  );
   for (const moment of moments) {
-    const line = describe(moment, records);
-    if (!line) continue;
+    const described = describe(moment, records);
+    if (!described) continue;
+    const subjectId = pickString(moment.data, "subjectId");
+    const line =
+      moment.kind === "policy" && subjectId && shadowed.has(subjectId)
+        ? { ...described, detail: "A Paytm specialist will complete it" }
+        : described;
     if (moment.kind === "approval") {
       const tone = approvalTone(moment, records);
       steps.push({ ...line, id: moment.id, kind: moment.kind, tone, text: approvalText(tone, records.channel) });
@@ -670,6 +744,9 @@ function approvalOutcome(approval: Approval, records: CallerRecords): Outcome {
 }
 
 function outcomeKey(moment: Moment, records: CallerRecords): string {
+  // The check-back's result replaces its promise on the same line.
+  const followUpId = pickString(moment.data, "followUpId");
+  if (followUpId) return `followUp:${followUpId}`;
   const hits = touchedRecords(records, moment.touched);
   const payout = hitOf(hits, "payout")?.record;
   if (payout) return `payout:${payout.kind}:${payout.subjectId}`;
@@ -707,9 +784,15 @@ export function summarizeCall(
       continue;
     }
     if (moment.kind === "escalated") {
-      const line = callbackLine(moment, records.channel);
-      handoffs.set(moment.id, { id: moment.id, icon: line.icon, tone: "handoff", title: line.text, detail: line.detail });
+      const line = handoffLine(moment, records.channel);
+      handoffs.set(moment.id, { id: moment.id, icon: line.icon, tone: "handoff", title: line.text, detail: line.detail, note: line.note });
       noteTickets(moment);
+      continue;
+    }
+    if (moment.kind === "verified" && moment.status === "ok" && pickString(moment.data, "followUpId")) {
+      const line = checkBackLine(moment, records);
+      const key = outcomeKey(moment, records);
+      outcomes.set(key, { id: key, icon: line.icon, tone: "done", title: line.text, note: line.note });
       continue;
     }
     if (moment.kind !== "action" || moment.status !== "ok") continue;

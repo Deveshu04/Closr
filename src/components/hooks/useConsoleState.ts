@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CallRecord, ConsoleState } from "@/lib/types";
+import { DEFAULT_AUTONOMY, readAutonomy } from "../lib/autonomy";
 
 export const EMPTY_STATE: ConsoleState = {
   call: null,
@@ -17,6 +18,10 @@ export const EMPTY_STATE: ConsoleState = {
   loans: [],
   payouts: [],
   tickets: [],
+  autonomy: DEFAULT_AUTONOMY,
+  lessons: [],
+  offers: [],
+  followUps: [],
 };
 
 const REQUEST_TIMEOUT_MS = 4000;
@@ -44,6 +49,10 @@ function normalize(raw: unknown): ConsoleState | null {
     loans: list(r.loans),
     payouts: list(r.payouts),
     tickets: list(r.tickets),
+    autonomy: readAutonomy(r.autonomy),
+    lessons: list(r.lessons),
+    offers: list(r.offers),
+    followUps: list(r.followUps),
   };
 }
 

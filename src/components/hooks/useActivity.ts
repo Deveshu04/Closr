@@ -29,6 +29,8 @@ function recordSignatures(state: ConsoleState): Map<string, string> {
     state.loans,
     state.payouts,
     state.tickets,
+    state.offers,
+    state.followUps,
   ];
   for (const rows of collections) for (const row of rows) out.set(row.id, JSON.stringify(row));
   return out;

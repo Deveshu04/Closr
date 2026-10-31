@@ -1,10 +1,12 @@
 "use client";
 
+import { GraduationCap } from "lucide-react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
-import { type CSSProperties, useEffect, useRef } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import type { CallRecord, Customer, Moment, MomentKind } from "@/lib/types";
 import { TranscriptButton } from "./backoffice/CallHistory";
 import { ChannelBadge } from "./ChannelBadge";
+import { CoachClosr } from "./CoachClosr";
 import type { ApprovalControls } from "./hooks/useApprovals";
 import { type Channel, channelOf } from "./lib/records";
 import { MomentRow, SPINE_LEFT } from "./moments/MomentRow";
@@ -20,6 +22,8 @@ interface Props {
   /** The customer on the call shown, once Closr has identified them. */
   customer: Customer | undefined;
   controls: ApprovalControls;
+  /** After a specialist saves coaching, so the playbook shows it at once. */
+  onCoached: () => void;
   className?: string;
 }
 
@@ -30,9 +34,12 @@ function offsetBase(moments: Moment[], call: CallRecord | null): number {
   return Number.isFinite(first) ? first : 0;
 }
 
-export function MomentsTimeline({ moments, call, customer, controls, className = "" }: Props) {
+export function MomentsTimeline({ moments, call, customer, controls, onCoached, className = "" }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const coachButton = useRef<HTMLButtonElement>(null);
+  const [coaching, setCoaching] = useState(false);
+  const callRef = call?.callRef ?? moments.at(-1)?.callRef;
   const reduceMotion = useReducedMotion();
   const live = call ? ACTIVE.has(call.status) : false;
   const ended = call?.status === "completed" || call?.status === "failed";
@@ -83,12 +90,36 @@ export function MomentsTimeline({ moments, call, customer, controls, className =
             </p>
           )}
           {ended && call && <TranscriptButton variant="button" call={{ callRef: call.callRef, hasTranscript: Boolean(call.transcript) }} />}
+          {callRef && steps > 0 && (
+            <button
+              ref={coachButton}
+              type="button"
+              aria-expanded={coaching}
+              onClick={() => setCoaching((v) => !v)}
+              className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-md border px-3 text-[13px] font-semibold shadow-[0_1px_2px_rgb(19_35_63/0.06)] transition-colors ${
+                coaching ? "border-sky bg-sky-wash text-navy" : "border-rule bg-sheet text-navy hover:border-sky hover:bg-sky-wash"
+              }`}
+            >
+              <GraduationCap aria-hidden size={15} strokeWidth={2.25} />
+              Coach Closr
+            </button>
+          )}
         </div>
         {ended && call?.summary && (
           <p className="w-full max-w-[64ch] border-l-2 border-sky/60 pl-3 font-serif text-[15.5px] italic leading-relaxed text-ink/85">
             {call.summary}
           </p>
         )}
+        <CoachClosr
+          key={callRef}
+          open={coaching && Boolean(callRef)}
+          onClose={() => {
+            setCoaching(false);
+            coachButton.current?.focus();
+          }}
+          callRef={callRef}
+          onSaved={onCoached}
+        />
       </header>
 
       <div

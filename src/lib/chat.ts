@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
 import spec from "./agent-spec.json";
 import * as db from "./db";
+import { lessonsForPrompt } from "./lessons";
 import { DEMO_PROFILES } from "./seed";
 import { isToolName, runTool } from "./tools";
 import type { CallRecord, Customer, ProfileKind } from "./types";
@@ -81,7 +82,8 @@ const TOOLS: ChatCompletionTool[] = spec.tools.map((tool) => ({
   },
 }));
 
-const HINGLISH_WORDS = /\b(hai|hain|nahi|nahin|mera|meri|mere|kya|kyu|paisa|paise|kar|karo|gaya|gaye|aaya|aya|raha|rahi|bhi|abhi|kal|aaj|se|mein|ko|ka|ki|ke|bol|bata|wapas)\b/i;
+const HINGLISH_WORDS =
+  /\b(hai|hain|nahi|nahin|na|haan|han|ji|theek|thik|accha|acha|mera|meri|mere|mujhe|kya|kyu|kyun|paisa|paise|kar|karo|kardo|kijiye|gaya|gaye|aaya|aya|raha|rahi|bhi|abhi|kal|aaj|se|mein|ko|ka|ki|ke|bol|bata|batao|wapas|bhej|bhejo|bhejiye|dena|dijiye|chahiye|shukriya|dhanyavad|bas)\b/i;
 
 function languageOf(text: string): string {
   if (/[\u0900-\u097F]/.test(text)) return "Hindi in Devanagari script";
@@ -89,16 +91,30 @@ function languageOf(text: string): string {
   return "English";
 }
 
-// A short reminder just before each reply holds a fast model to the two rules it drifts from most: the
-// customer's language and reporting every outcome. It is sent with the request, never stored in the history.
-function turnReminder(customerText: string): ChatCompletionMessageParam {
+// A short reminder just before each reply holds a fast model to the rules it drifts from most: the customer's
+// language, reporting fresh outcomes (and only fresh ones), and short references. Sent with the request, never stored.
+function turnReminder(customerText: string, afterTools: boolean): ChatCompletionMessageParam {
   return {
     role: "system",
-    content:
-      `Reply in ${languageOf(customerText)}, the language of the customer's last message, even though tool results are in English. ` +
-      "Cover every outcome from this turn's tool results in order, starting with whether their money is safe and how much arrived or is being returned. " +
-      "Give only the last four characters of any reference or dispute number.",
+    content: [
+      `Reply in ${languageOf(customerText)}, the language of the customer's last message, even though tool results are in English.`,
+      afterTools
+        ? "Cover every outcome from the tool results just above, in order, starting with whether their money is safe and how much arrived or is being returned."
+        : "Answer only what they just said; do not repeat outcomes you already told them.",
+      "Give only the last four characters of any reference or dispute number, and quote dates exactly as the tools give them; never merge two different dates.",
+    ].join(" "),
   };
+}
+
+// Read-only steps (like looking up an offer) are not news, so they shouldn't make the reply re-summarise the fix.
+const QUIET_TOOLS = new Set(["check_offers", "lookup_customer"]);
+
+function actedSinceCustomerSpoke(messages: ChatCompletionMessageParam[]): boolean {
+  const lastCustomer = messages.findLastIndex((message) => message.role === "user");
+  return messages
+    .slice(lastCustomer + 1)
+    .flatMap((message) => (message.role === "assistant" ? (message.tool_calls ?? []) : []))
+    .some((call) => call.type === "function" && !QUIET_TOOLS.has(call.function.name));
 }
 
 async function complete(messages: ChatCompletionMessageParam[]): Promise<OpenAI.ChatCompletionMessage> {
@@ -138,6 +154,9 @@ How you write
 
 How you work
 ${spec.playbook.map((line) => `- ${line}`).join("\n")}
+
+Lessons from your Paytm specialists (follow them over the general rules when they apply)
+${lessonsForPrompt()}
 
 Ending
 - Once the issue is resolved, ask if there is anything else. If not, thank them in one line.`;
@@ -197,11 +216,14 @@ export async function chatTurn(sessionRef: string, text: string): Promise<{ repl
     ],
   };
   sessions.set(sessionRef, session);
+  // Rebuilt every turn so coaching saved mid-conversation applies from the next reply.
+  session.messages[0] = { role: "system", content: instructionsFor(customer) };
   appendTranscript(call, "user", text);
   session.messages.push({ role: "user", content: text });
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const message = await complete([...session.messages, turnReminder(text)]);
+    const afterTools = actedSinceCustomerSpoke(session.messages);
+    const message = await complete([...session.messages, turnReminder(text, afterTools)]);
     const toolCalls = (message.tool_calls ?? []).filter((toolCall) => toolCall.type === "function");
     session.messages.push({ role: "assistant", content: message.content ?? null, ...(toolCalls.length && { tool_calls: toolCalls }) });
 

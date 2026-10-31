@@ -19,11 +19,16 @@ One care executive handles two kinds of customer from a single console.
 | Merchant | Soundbox stopped announcing payments | Confirms every payment that arrived, restarts the device remotely, updates firmware and plays a ₹1 test announcement. |
 | Merchant | Settlement didn't reach the bank | Re-sends a settlement that failed for a technical reason and confirms the UTR. Bank details are never changed in a conversation. |
 | Merchant | Rent charged after returning a device | Refunds rent charged after the pickup date and stops billing; above ₹1,000 a specialist approves. |
+| Both | Issue fixed, customer satisfied | Offers at most one product that stops the problem recurring (UPI Lite after failed payments, a dual-SIM Soundbox after a silent one). The offer goes to the app; nothing is signed up or charged in the conversation, and loan offers carry their Key Fact Statement. |
+
+Every dispute schedules a follow-up: the case closes only when the money has actually landed, and the customer gets an SMS.
 
 ## Built for trust
 
 - **Policies as code decide, not the model.** Every money movement passes a deterministic policy check, shown to the care team as a checklist.
-- **Earned autonomy.** Closr acts alone within limits (L2) and asks a specialist for one-tap approval above them.
+- **Earned autonomy, per workflow.** A trust dial sets each money workflow to L0 Shadow (Closr suggests, a specialist acts), L1 Approve (every payout waits for one tap) or L2 Auto within limits. L3 stays locked until accuracy is proven.
+- **A teammate that learns.** Specialists coach Closr with "next time, do X"; every lesson reaches the next call and chat immediately.
+- **Measurable outcomes.** The console tracks conversations, autonomous and verified resolutions, money returned, escalations and time to resolve.
 - **Nothing pays twice.** Every action is idempotent per subject, so a repeated turn on a call returns the same refund or dispute.
 - **Identity comes from the channel.** The customer is bound to the number Closr dialled or the signed-in app, never to what the model heard.
 - **Claims are checked, not believed.** When a customer cites a rule ("RBI says 10 minutes"), Closr checks it against RBI, NPCI, government and Paytm sources only and answers with the source.

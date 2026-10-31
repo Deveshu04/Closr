@@ -4,7 +4,9 @@ import type {
   Customer,
   Device,
   Dispute,
+  FollowUp,
   Loan,
+  Offer,
   Payout,
   ProfileKind,
   RentalCharge,
@@ -27,6 +29,8 @@ export type RecordBook = Pick<
   | "loans"
   | "payouts"
   | "tickets"
+  | "offers"
+  | "followUps"
 >;
 
 export type RecordHit =
@@ -39,7 +43,9 @@ export type RecordHit =
   | { type: "reward"; record: Reward }
   | { type: "loan"; record: Loan }
   | { type: "payout"; record: Payout }
-  | { type: "ticket"; record: Ticket };
+  | { type: "ticket"; record: Ticket }
+  | { type: "offer"; record: Offer }
+  | { type: "followUp"; record: FollowUp };
 
 export type RecordType = RecordHit["type"];
 
@@ -61,6 +67,10 @@ export function findRecord(book: RecordBook, id: string): RecordHit | undefined 
   if (ticket) return { type: "ticket", record: ticket };
   const txn = book.transactions.find((t) => t.id === id || t.rrn === id);
   if (txn) return { type: "transaction", record: txn };
+  const offer = book.offers.find((o) => o.id === id);
+  if (offer) return { type: "offer", record: offer };
+  const followUp = book.followUps.find((f) => f.id === id);
+  if (followUp) return { type: "followUp", record: followUp };
   const loan = book.loans.find((l) => l.id === id || l.deductions.some((d) => d.id === id));
   if (loan) return { type: "loan", record: loan };
   const customer = book.customers.find((c) => c.id === id);
@@ -94,6 +104,8 @@ export function recordsFor(book: RecordBook, customerId: string | undefined): Re
     loans: mine(book.loans),
     payouts: mine(book.payouts),
     tickets: mine(book.tickets),
+    offers: mine(book.offers),
+    followUps: mine(book.followUps),
   };
 }
 

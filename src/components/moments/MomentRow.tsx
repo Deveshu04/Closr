@@ -1,5 +1,6 @@
 "use client";
 
+import { Lightbulb } from "lucide-react";
 import { motion } from "motion/react";
 import type { Moment, MomentKind, MomentStatus } from "@/lib/types";
 import type { ApprovalControls } from "../hooks/useApprovals";
@@ -11,9 +12,10 @@ import { EscalatedMoment } from "./EscalatedMoment";
 import { LookupMoment } from "./LookupMoment";
 import { PolicyMoment } from "./PolicyMoment";
 import { SearchMoment } from "./SearchMoment";
+import { ShadowMoment } from "./ShadowMoment";
 import { UnderstoodMoment } from "./UnderstoodMoment";
 import { VerifiedMoment } from "./VerifiedMoment";
-import { KIND_META, isTrouble } from "./shared";
+import { KIND_META, isShadow, isTrouble } from "./shared";
 
 /** Gutter width + gap + half the node column; the timeline's spine is drawn at this offset. */
 export const SPINE_LEFT = "calc(3.25rem + 0.75rem + 1rem)";
@@ -48,16 +50,18 @@ function Node({ moment, latest }: { moment: Moment; latest: boolean }) {
       />
     );
   }
-  const Icon = KIND_META[moment.kind].icon;
+  const shadow = isShadow(moment);
+  const Icon = shadow ? Lightbulb : KIND_META[moment.kind].icon;
+  const label = shadow ? "Shadow suggestion" : KIND_META[moment.kind].label;
+  // A suggestion waits on a specialist off the call, so it gets a calm dashed node instead of the amber pulse.
+  const look = shadow ? "border-dashed border-navy/50 bg-sky-wash text-navy" : nodeClass(moment.kind, moment.status, moment.data?.verdict);
   return (
     <span
-      title={KIND_META[moment.kind].label}
-      className={`relative z-10 grid size-8 place-items-center rounded-full border-[1.5px] ${nodeClass(moment.kind, moment.status, moment.data?.verdict)} ${
-        latest ? "outline-4 outline-sky/25" : ""
-      }`}
+      title={label}
+      className={`relative z-10 grid size-8 place-items-center rounded-full border-[1.5px] ${look} ${latest ? "outline-4 outline-sky/25" : ""}`}
     >
       <Icon aria-hidden size={16} strokeWidth={2.25} />
-      <span className="sr-only">{KIND_META[moment.kind].label}</span>
+      <span className="sr-only">{label}</span>
     </span>
   );
 }
@@ -81,7 +85,7 @@ function Body({ moment, controls }: { moment: Moment; controls: ApprovalControls
     case "search":
       return <SearchMoment moment={moment} />;
     case "escalated":
-      return <EscalatedMoment moment={moment} />;
+      return isShadow(moment) ? <ShadowMoment moment={moment} /> : <EscalatedMoment moment={moment} />;
     default:
       return <CallLine moment={moment} />;
   }

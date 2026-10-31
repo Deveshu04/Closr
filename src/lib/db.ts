@@ -6,12 +6,16 @@ import { chargesAfterReturn } from "@/lib/policy";
 import { createSeed, DEMO_PROFILES, type DeviceRecord, type SeedData } from "@/lib/seed";
 import type {
   Approval,
+  AutonomyLevel,
   CallRecord,
   ConsoleState,
   Customer,
   Dispute,
+  FollowUp,
+  Lesson,
   Loan,
   Moment,
+  Offer,
   Payout,
   ProfileKind,
   RentalCharge,
@@ -19,12 +23,13 @@ import type {
   Settlement,
   Ticket,
   UpiTransaction,
+  Workflow,
 } from "@/lib/types";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const DB_FILE = path.join(DATA_DIR, "db.json");
 /** Bump when the stored shape or seed story changes, so an old db.json is re-seeded instead of misread. */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 6;
 const MOMENT_HISTORY_LIMIT = 1000;
 
 interface DbState extends SeedData {
@@ -34,7 +39,12 @@ interface DbState extends SeedData {
   calls: CallRecord[];
   moments: Moment[];
   approvals: Approval[];
+  autonomy: Record<Workflow, AutonomyLevel>;
+  lessons: Lesson[];
+  followUps: FollowUp[];
 }
+
+export const DEFAULT_AUTONOMY: Record<Workflow, AutonomyLevel> = { cashback: 2, rent_refunds: 2, settlement_retries: 2 };
 
 function freshState(): DbState {
   return {
@@ -44,6 +54,9 @@ function freshState(): DbState {
     calls: [],
     moments: [],
     approvals: [],
+    autonomy: { ...DEFAULT_AUTONOMY },
+    lessons: [],
+    followUps: [],
     ...createSeed(),
   };
 }
@@ -103,10 +116,11 @@ function samePhone(a: string, b: string): boolean {
 }
 
 /** Re-seeds the demo data but keeps past calls and their moments: transcripts are the review record. */
+/** Re-seeds the demo data but keeps call history, autonomy settings and lessons unless asked to clear them. */
 export function resetDb({ keepHistory = true }: { keepHistory?: boolean } = {}): void {
   if (!keepHistory) return save(freshState());
-  const { calls, moments } = read((state) => ({ calls: state.calls, moments: state.moments }));
-  save({ ...freshState(), calls, moments });
+  const kept = read(({ calls, moments, autonomy, lessons }) => ({ calls, moments, autonomy, lessons }));
+  save({ ...freshState(), ...kept });
 }
 
 export function getState(): ConsoleState {
@@ -126,7 +140,99 @@ export function getState(): ConsoleState {
       loans: state.loans,
       payouts: newestFirst(state.payouts, (payout) => payout.createdAt),
       tickets: newestFirst(state.tickets, (ticket) => ticket.updatedAt),
+      autonomy: state.autonomy,
+      lessons: newestFirst(state.lessons, (lesson) => lesson.createdAt),
+      offers: state.offers,
+      followUps: newestFirst(state.followUps, (followUp) => followUp.dueAt),
     };
+  });
+}
+
+// ---------- Autonomy and lessons ----------
+
+export function getAutonomy(): Record<Workflow, AutonomyLevel> {
+  return read((state) => state.autonomy);
+}
+
+export function setAutonomy(workflow: Workflow, level: AutonomyLevel): Record<Workflow, AutonomyLevel> {
+  return write((state) => {
+    state.autonomy[workflow] = level;
+    return state.autonomy;
+  });
+}
+
+export function listLessons(): Lesson[] {
+  return read((state) => newestFirst(state.lessons, (lesson) => lesson.createdAt));
+}
+
+export function addLesson(text: string, sourceCallRef?: string): Lesson {
+  return write((state) => {
+    const lesson: Lesson = { id: voiceSafeId("LSN"), text, createdAt: new Date().toISOString(), sourceCallRef };
+    state.lessons.push(lesson);
+    return lesson;
+  });
+}
+
+export function deleteLesson(id: string): boolean {
+  return write((state) => {
+    const before = state.lessons.length;
+    state.lessons = state.lessons.filter((lesson) => lesson.id !== id);
+    return state.lessons.length < before;
+  });
+}
+
+// ---------- Follow-ups ----------
+
+/** One check-back per dispute, so a repeated tool call can't schedule it twice. */
+export function scheduleFollowUpOnce(input: Omit<FollowUp, "id" | "status">): FollowUp {
+  return write((state) => {
+    const existing = state.followUps.find((followUp) => followUp.disputeId === input.disputeId);
+    if (existing) return existing;
+    const followUp: FollowUp = { ...input, id: voiceSafeId("FUP"), status: "scheduled" };
+    state.followUps.push(followUp);
+    return followUp;
+  });
+}
+
+export function listFollowUps(status?: FollowUp["status"]): FollowUp[] {
+  return read((state) => state.followUps.filter((followUp) => !status || followUp.status === status));
+}
+
+export function completeFollowUp(id: string, outcome: string): FollowUp | null {
+  return write((state) => {
+    const followUp = byId(state.followUps, id);
+    if (!followUp || followUp.status === "done") return null;
+    Object.assign(followUp, { status: "done", outcome, doneAt: new Date().toISOString() });
+    return followUp;
+  });
+}
+
+/** Settles a disputed payment as reversed by the bank, as the dispute's resolution would. */
+export function reverseDisputedPayment(txnId: string, disputeId: string, rrn: string): UpiTransaction | null {
+  return write((state) => {
+    const txn = byId(state.transactions, txnId);
+    const dispute = byId(state.disputes, disputeId);
+    if (!txn || !dispute) return null;
+    const now = new Date().toISOString();
+    txn.status = "reversed";
+    txn.reversal = { deadline: txn.reversal?.deadline ?? now, reversedAt: now, rrn };
+    dispute.status = "resolved";
+    return txn;
+  });
+}
+
+// ---------- Offers ----------
+
+export function listOffers(customerId: string): Offer[] {
+  return read((state) => state.offers.filter((offer) => offer.customerId === customerId));
+}
+
+export function updateOffer(id: string, patch: Partial<Omit<Offer, "id" | "customerId">>): Offer | null {
+  return write((state) => {
+    const offer = byId(state.offers, id);
+    if (!offer) return null;
+    Object.assign(offer, patch);
+    return offer;
   });
 }
 
@@ -194,6 +300,15 @@ export function updateMoment(id: string, patch: Partial<Moment>): void {
     if (!moment) return;
     const data = patch.data ? { ...moment.data, ...patch.data } : moment.data;
     Object.assign(moment, patch, { id: moment.id, callRef: moment.callRef, at: moment.at, data });
+  });
+}
+
+/** Every conversation's moments grouped by call, in one read of the store. */
+export function momentsByCall(): Map<string, Moment[]> {
+  return read((state) => {
+    const grouped = new Map<string, Moment[]>();
+    for (const moment of state.moments) grouped.set(moment.callRef, [...(grouped.get(moment.callRef) ?? []), moment]);
+    return grouped;
   });
 }
 
