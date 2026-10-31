@@ -6,6 +6,9 @@ Closr is an AI teammate for Paytm customer care. It does not stop at answering: 
 
 Built for the Paytm Build for India AI Hackathon (Delhi), track *AI Teammates for Customer Service and Sales*, by Team KALESH.
 
+![Closr fixes a merchant's silent Soundbox on a live call, then a specialist approves a refund in one tap](docs/media/closr-demo.gif)
+
+- Demo video, 2:37 with voiceover: [docs/media/closr-demo.mp4](docs/media/closr-demo.mp4)
 - Architecture and design decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Judges' test guide: [How to test and verify](#how-to-test-and-verify)
 
@@ -129,7 +132,7 @@ src/lib/          tools, policy, store, seed data, chat engine, claim checks, Bo
 src/app/api/      tools for the agent, call and chat endpoints, state, approvals, autonomy, lessons, follow-ups, transcripts, diagnostics
 src/components/   Care Console, customer app (call back and chat), moments timeline, back office
 scripts/          the Bolna voice agent, defined in code
-docs/             architecture
+docs/             architecture, demo video and GIF
 ```
 
 The back-office systems are realistic simulations seeded with demo data; in production they would be Paytm's own services behind the same tool interface.
