@@ -33,7 +33,7 @@ How you work
 - Consumer, failed UPI payment ("paisa kat gaya, payment fail"): get_transaction, then tell them where the money is. If it is already reversed, give the reversal reference. If not, raise_dispute and give the dispute reference and the date by which their bank must reverse it under RBI rules. The bank reverses the money, not Paytm: never promise that Paytm will pay it.
 - Consumer, cashback not received: check_cashback, then credit_cashback.
 - Consumer, loan or EMI problem: get_loan. Paytm cannot refund a lender's money: raise_lender_grievance and tell them the lender's grievance officer has it and must respond within 30 days.
-- Merchant, Soundbox silent or "paisa aaya ki nahi": check_payments first and reassure them every payment arrived, then diagnose_device and fix_device (restart, then firmware_update if needed, then test_announcement). book_replacement only if fixing fails.
+- Merchant, Soundbox silent or "paisa aaya ki nahi": check_payments first and reassure them with the exact count and total that arrived (e.g. "9 payments, 2,300 रुपये, सब आपके account में आ गए"), then diagnose_device and fix_device (restart, then firmware_update if needed, then test_announcement). book_replacement only if fixing fails.
 - Merchant, settlement not received: get_settlement, then retry_settlement if allowed. Never change bank details on a call: if the account is closed or wrong, send_bank_update_link so they change it securely in the app.
 - Merchant, rent charged after returning a device: check_rent, then refund_rent.
 - If a tool says it needs approval, say you are taking a quick approval from a Paytm specialist and keep them on the line; the tool waits for the decision.
@@ -45,7 +45,7 @@ When to bring in a human (call escalate with a crisp summary)
 - Tell them a teammate has the full context and will call back, so they won't need to repeat themselves.
 
 Ending the call
-- Once the issue is resolved, ask "और कुछ मदद कर सकती हूँ?". If they say no, thank them in one line and stop talking so the call can end.
+- Once the issue is resolved, ask "और कुछ मदद कर सकती हूँ?". If they say no, say one short goodbye ("पेटीएम पर भरोसा करने के लिए धन्यवाद, नमस्ते।") and nothing more; never repeat the goodbye. The call then ends by itself.
 
 Never ask for OTPs, UPI PINs, passwords or card numbers. Never invent policies, amounts, dates or references.`;
 
@@ -147,7 +147,8 @@ const TRANSCRIBERS = {
     model: "saaras:v4",
     language: "hi",
     stream: true,
-    endpointing: 1000,
+    endpointing: 1200,
+    vad_threshold: 0.35,
     keywords: "Paytm, UPI, Soundbox, settlement, cashback, refund, EMI, loan, dispute, UTR, RBI, NPCI, Closr",
     context: "Paytm customer care call back in Hinglish. A consumer asks about a failed UPI payment, cashback or a loan EMI, or a kirana merchant asks about a silent Soundbox, a settlement or rent on a returned device.",
   },
@@ -197,16 +198,17 @@ const agentConfig = {
         use_fillers: false,
         number_of_words_for_interruption: 3,
         interruption_backoff_period: 100,
-        incremental_delay: 900,
-        hangup_after_silence: 25,
+        incremental_delay: 1400,
+        hangup_after_silence: 60,
         call_terminate: 420,
         voicemail: false,
-        check_if_user_online: true,
+        check_if_user_online: false,
         trigger_user_online_message_after: 30,
         check_user_online_message: "Hello, क्या आप line पर हैं?",
         hangup_after_LLMCall: true,
         call_cancellation_prompt: HANGUP_PROMPT,
-        call_hangup_message: "पेटीएम पर भरोसा करने के लिए धन्यवाद। आपका दिन शुभ हो, नमस्ते।",
+        // The agent says its own goodbye, so the hang-up itself stays silent instead of thanking the caller twice.
+        call_hangup_message: "",
         interruptible_hangup_message: true,
       },
     },
